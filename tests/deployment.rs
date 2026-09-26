@@ -686,6 +686,25 @@ async fn agent_policy_delivery_ingestion_reassignment_and_unenrollment() {
         );
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
+    let refresh = reqwest::Client::builder()
+        .add_root_certificate(ca())
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap()
+        .post(format!(
+            "{}/.alerts-security.alerts-default/_refresh",
+            env("ELASTICSEARCH_URL")
+        ))
+        .basic_auth("elastic", Some(env("KIBANA_PASSWORD")))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(refresh["_shards"]["failed"], 0);
     assert_eq!(
         search(
             ".alerts-security.alerts-default",
