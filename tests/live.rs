@@ -9,14 +9,18 @@ use kibana_rs::{
 use std::{collections::BTreeMap, time::Duration};
 
 fn client() -> Client {
-    Client::builder(std::env::var("KIBANA_URL").expect("KIBANA_URL is required"))
+    let mut builder = Client::builder(std::env::var("KIBANA_URL").expect("KIBANA_URL is required"))
         .auth(Auth::Basic {
             username: std::env::var("KIBANA_USERNAME").unwrap_or("elastic".into()),
             password: std::env::var("KIBANA_PASSWORD").expect("KIBANA_PASSWORD is required"),
         })
-        .timeout(Duration::from_secs(180))
-        .build()
-        .unwrap()
+        .timeout(Duration::from_secs(180));
+    if let Ok(path) = std::env::var("KIBANA_CA_CERT") {
+        builder = builder.root_certificate(
+            reqwest::Certificate::from_pem(&std::fs::read(path).unwrap()).unwrap(),
+        );
+    }
+    builder.build().unwrap()
 }
 
 async fn space(root: &Client) -> (String, Client) {
@@ -204,11 +208,10 @@ async fn fleet_policy_and_integration_lifecycle() {
         client.fleet().delete_agent_policy(&copy.id).await?;
 
         let packages = client.fleet().integrations().await?;
-        let package = packages
-            .items
-            .iter()
-            .find(|p| p.name == "system")
-            .expect("system package in registry");
+        assert!(packages.items.iter().any(|p| p.name == "system"));
+        let version = std::env::var("KIBANA_TEST_SYSTEM_VERSION")
+            .expect("KIBANA_TEST_SYSTEM_VERSION must pin the package version");
+        let package = client.fleet().integration("system", &version).await?;
         client
             .fleet()
             .install_integration(&package.name, &package.version)

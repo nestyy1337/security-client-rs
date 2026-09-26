@@ -178,3 +178,21 @@ fn invalid_configuration_and_debug_do_not_leak_credentials() {
             .is_err()
     );
 }
+
+#[tokio::test]
+async fn request_timeout_is_a_transport_error() {
+    let (url, task) = mock(Router::new().fallback(any(|| async {
+        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+        axum::Json(json!({"status": "late"}))
+    })))
+    .await;
+    let client = Client::builder(url)
+        .timeout(std::time::Duration::from_millis(100))
+        .build()
+        .unwrap();
+    assert!(matches!(
+        client.status().await.unwrap_err(),
+        Error::Transport(error) if error.is_timeout()
+    ));
+    task.abort();
+}
