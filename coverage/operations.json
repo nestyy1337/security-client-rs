@@ -1,0 +1,492 @@
+[
+  {
+    "wrapper": "cases.comment",
+    "method": "POST",
+    "path": "/api/cases/{caseId}/comments",
+    "operation_id": "addCaseCommentDefaultSpace",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-cases",
+    "notes": "User-text comments only, no alert attachments."
+  },
+  {
+    "wrapper": "cases.comments",
+    "method": "GET",
+    "path": "/api/cases/{caseId}/comments/_find",
+    "operation_id": "findCaseCommentsDefaultSpace",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-cases",
+    "notes": "Page and page size only; response remains JSON."
+  },
+  {
+    "wrapper": "cases.create",
+    "method": "POST",
+    "path": "/api/cases",
+    "operation_id": "createCaseDefaultSpace",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-cases",
+    "notes": "Basic case fields, connector and syncAlerts; no assignee or custom-field creation type."
+  },
+  {
+    "wrapper": "cases.delete",
+    "method": "DELETE",
+    "path": "/api/cases",
+    "operation_id": "deleteCaseDefaultSpace",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-cases",
+    "notes": "ID-list deletion; no full contract audit."
+  },
+  {
+    "wrapper": "cases.find",
+    "method": "GET",
+    "path": "/api/cases/_find",
+    "operation_id": "findCasesDefaultSpace",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-cases",
+    "notes": "Page, page size, owner and search only."
+  },
+  {
+    "wrapper": "cases.get",
+    "method": "GET",
+    "path": "/api/cases/{caseId}",
+    "operation_id": "getCaseDefaultSpace",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-cases",
+    "notes": "Core case fields and extensible JSON response."
+  },
+  {
+    "wrapper": "cases.update",
+    "method": "PATCH",
+    "path": "/api/cases",
+    "operation_id": "updateCaseDefaultSpace",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-cases",
+    "notes": "Versioned title, status and severity patches only."
+  },
+  {
+    "wrapper": "client.status",
+    "method": "GET",
+    "path": "/api/status",
+    "operation_id": "get-status",
+    "scope": "Global",
+    "contract": "unreviewed",
+    "evidence": "browser",
+    "notes": "JSON status response; completeness not audited."
+  },
+  {
+    "wrapper": "fleet.agent",
+    "method": "GET",
+    "path": "/api/fleet/agents/{agentId}",
+    "operation_id": "get-fleet-agents-agentid",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Core fields plus extensible JSON; no enrolled-agent test."
+  },
+  {
+    "wrapper": "fleet.agent_policies",
+    "method": "GET",
+    "path": "/api/fleet/agent_policies",
+    "operation_id": "get-fleet-agent-policies",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-fleet",
+    "notes": "Page, page size and kuery; requests full policies and agent counts."
+  },
+  {
+    "wrapper": "fleet.agent_policy",
+    "method": "GET",
+    "path": "/api/fleet/agent_policies/{agentPolicyId}",
+    "operation_id": "get-fleet-agent-policies-agentpolicyid",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-fleet",
+    "notes": "Core policy fields plus extensible JSON."
+  },
+  {
+    "wrapper": "fleet.agent_status",
+    "method": "GET",
+    "path": "/api/fleet/agent_status",
+    "operation_id": "get-fleet-agent-status",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-fleet",
+    "notes": "JSON status summary; exercised with an empty fleet."
+  },
+  {
+    "wrapper": "fleet.agents",
+    "method": "GET",
+    "path": "/api/fleet/agents",
+    "operation_id": "get-fleet-agents",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-fleet",
+    "notes": "Page, page size and kuery only; exercised with an empty fleet."
+  },
+  {
+    "wrapper": "fleet.copy_agent_policy",
+    "method": "POST",
+    "path": "/api/fleet/agent_policies/{agentPolicyId}/copy",
+    "operation_id": "post-fleet-agent-policies-agentpolicyid-copy",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-fleet",
+    "notes": "New name only; additional copy options not exposed."
+  },
+  {
+    "wrapper": "fleet.create_agent_policy",
+    "method": "POST",
+    "path": "/api/fleet/agent_policies",
+    "operation_id": "post-fleet-agent-policies",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-fleet",
+    "notes": "Name, namespace, description, monitoring, output and inactivity options only."
+  },
+  {
+    "wrapper": "fleet.create_package_policy",
+    "method": "POST",
+    "path": "/api/fleet/package_policies",
+    "operation_id": "post-fleet-package-policies",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-fleet",
+    "notes": "Simplified inputs with JSON vars; selected top-level fields only."
+  },
+  {
+    "wrapper": "fleet.delete_agent_policy",
+    "method": "POST",
+    "path": "/api/fleet/agent_policies/delete",
+    "operation_id": "post-fleet-agent-policies-delete",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-fleet",
+    "notes": "Policy-ID deletion; no full contract audit."
+  },
+  {
+    "wrapper": "fleet.delete_package_policy",
+    "method": "DELETE",
+    "path": "/api/fleet/package_policies/{packagePolicyId}",
+    "operation_id": "delete-fleet-package-policies-packagepolicyid",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-fleet",
+    "notes": "Single package-policy deletion, JSON result."
+  },
+  {
+    "wrapper": "fleet.download_agent_policy",
+    "method": "GET",
+    "path": "/api/fleet/agent_policies/{agentPolicyId}/download",
+    "operation_id": "get-fleet-agent-policies-agentpolicyid-download",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-fleet",
+    "notes": "Streaming policy response; alternate download options not audited."
+  },
+  {
+    "wrapper": "fleet.install_integration",
+    "method": "POST",
+    "path": "/api/fleet/epm/packages/{pkgName}/{pkgVersion}",
+    "operation_id": "post-fleet-epm-packages-pkgname-pkgversion",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-fleet",
+    "notes": "Default installation options only, JSON asset result."
+  },
+  {
+    "wrapper": "fleet.integration",
+    "method": "GET",
+    "path": "/api/fleet/epm/packages/{pkgName}/{pkgVersion}",
+    "operation_id": "get-fleet-epm-packages-pkgname-pkgversion",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-fleet",
+    "notes": "Exact package name/version; core fields plus extensible JSON."
+  },
+  {
+    "wrapper": "fleet.integrations",
+    "method": "GET",
+    "path": "/api/fleet/epm/packages",
+    "operation_id": "get-fleet-epm-packages",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-fleet",
+    "notes": "Default package catalogue, no catalogue filters exposed."
+  },
+  {
+    "wrapper": "fleet.outputs",
+    "method": "GET",
+    "path": "/api/fleet/outputs",
+    "operation_id": "get-fleet-outputs",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-fleet",
+    "notes": "Default output listing as JSON; not output management."
+  },
+  {
+    "wrapper": "fleet.package_policies",
+    "method": "GET",
+    "path": "/api/fleet/package_policies",
+    "operation_id": "get-fleet-package-policies",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-fleet",
+    "notes": "Page, page size and kuery only."
+  },
+  {
+    "wrapper": "fleet.package_policy",
+    "method": "GET",
+    "path": "/api/fleet/package_policies/{packagePolicyId}",
+    "operation_id": "get-fleet-package-policies-packagepolicyid",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-fleet",
+    "notes": "Core fields plus extensible JSON; inputs remain JSON."
+  },
+  {
+    "wrapper": "fleet.reassign_agent",
+    "method": "POST",
+    "path": "/api/fleet/agents/{agentId}/reassign",
+    "operation_id": "post-fleet-agents-agentid-reassign",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Policy-ID reassignment request; no agent acknowledgment test."
+  },
+  {
+    "wrapper": "fleet.setup",
+    "method": "POST",
+    "path": "/api/fleet/setup",
+    "operation_id": "post-fleet-setup",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-fleet",
+    "notes": "Published in the bundle under Fleet internals; do not infer a stable lifecycle from documentation."
+  },
+  {
+    "wrapper": "fleet.unenroll_agent",
+    "method": "POST",
+    "path": "/api/fleet/agents/{agentId}/unenroll",
+    "operation_id": "post-fleet-agents-agentid-unenroll",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Default unenrollment options only; no enrolled-agent test."
+  },
+  {
+    "wrapper": "fleet.uninstall_integration",
+    "method": "DELETE",
+    "path": "/api/fleet/epm/packages/{pkgName}/{pkgVersion}",
+    "operation_id": "delete-fleet-epm-packages-pkgname-pkgversion",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Default removal request; no recorded live removal test."
+  },
+  {
+    "wrapper": "fleet.update_agent_policy",
+    "method": "PUT",
+    "path": "/api/fleet/agent_policies/{agentPolicyId}",
+    "operation_id": "put-fleet-agent-policies-agentpolicyid",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-fleet",
+    "notes": "Same limited policy settings as creation."
+  },
+  {
+    "wrapper": "fleet.update_package_policy",
+    "method": "PUT",
+    "path": "/api/fleet/package_policies/{packagePolicyId}",
+    "operation_id": "put-fleet-package-policies-packagepolicyid",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-fleet",
+    "notes": "Simplified input format and selected fields only."
+  },
+  {
+    "wrapper": "roles.delete",
+    "method": "DELETE",
+    "path": "/api/security/role/{name}",
+    "operation_id": "delete-security-role-name",
+    "scope": "Global",
+    "contract": "unreviewed",
+    "evidence": "live-roles-spaces",
+    "notes": "Single global role deletion; no full contract audit."
+  },
+  {
+    "wrapper": "roles.get",
+    "method": "GET",
+    "path": "/api/security/role/{name}",
+    "operation_id": "get-security-role-name",
+    "scope": "Global",
+    "contract": "partial",
+    "evidence": "live-roles-spaces",
+    "notes": "Kibana privileges and JSON Elasticsearch privileges; additional metadata discarded."
+  },
+  {
+    "wrapper": "roles.list",
+    "method": "GET",
+    "path": "/api/security/role",
+    "operation_id": "get-security-role",
+    "scope": "Global",
+    "contract": "partial",
+    "evidence": "live-roles-spaces",
+    "notes": "Kibana privileges and JSON Elasticsearch privileges; additional metadata discarded."
+  },
+  {
+    "wrapper": "roles.put",
+    "method": "PUT",
+    "path": "/api/security/role/{name}",
+    "operation_id": "put-security-role-name",
+    "scope": "Global",
+    "contract": "partial",
+    "evidence": "live-roles-spaces",
+    "notes": "Kibana and Elasticsearch privileges; other role settings not modeled."
+  },
+  {
+    "wrapper": "security.create_rule",
+    "method": "POST",
+    "path": "/api/detection_engine/rules",
+    "operation_id": "CreateRule",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-rules",
+    "notes": "KQL/Lucene query rules only; other rule types and advanced settings lack creation types."
+  },
+  {
+    "wrapper": "security.delete_rule",
+    "method": "DELETE",
+    "path": "/api/detection_engine/rules",
+    "operation_id": "DeleteRule",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-rules",
+    "notes": "ID or rule_id lookup; complete deletion contract not audited."
+  },
+  {
+    "wrapper": "security.export_rules",
+    "method": "POST",
+    "path": "/api/detection_engine/rules/_export",
+    "operation_id": "ExportRules",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-rules",
+    "notes": "Explicit rule_id selection, streaming NDJSON; additional export options not exposed."
+  },
+  {
+    "wrapper": "security.import_rules",
+    "method": "POST",
+    "path": "/api/detection_engine/rules/_import",
+    "operation_id": "ImportRules",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-rules",
+    "notes": "Multipart NDJSON and overwrite only; HTTP-200 partial failures retained as JSON."
+  },
+  {
+    "wrapper": "security.initialize",
+    "method": "POST",
+    "path": "/api/detection_engine/index",
+    "operation_id": "CreateAlertsIndex",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-rules",
+    "notes": "Alert-index initialization only; not detection execution."
+  },
+  {
+    "wrapper": "security.privileges",
+    "method": "GET",
+    "path": "/api/detection_engine/privileges",
+    "operation_id": "ReadPrivileges",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-rules",
+    "notes": "JSON privilege response; exercised only as administrator in the live suite."
+  },
+  {
+    "wrapper": "security.rule",
+    "method": "GET",
+    "path": "/api/detection_engine/rules",
+    "operation_id": "ReadRule",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-rules",
+    "notes": "ID or rule_id lookup; response has core fields and an extensible JSON map."
+  },
+  {
+    "wrapper": "security.rules",
+    "method": "GET",
+    "path": "/api/detection_engine/rules/_find",
+    "operation_id": "FindRules",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-rules",
+    "notes": "Page, page size and filter exposed; other search options not modeled."
+  },
+  {
+    "wrapper": "security.update_rule",
+    "method": "PATCH",
+    "path": "/api/detection_engine/rules",
+    "operation_id": "PatchRule",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-rules",
+    "notes": "Name, description, enabled, query, severity, risk score and tags only."
+  },
+  {
+    "wrapper": "spaces.create",
+    "method": "POST",
+    "path": "/api/spaces/space",
+    "operation_id": "post-spaces-space",
+    "scope": "Global",
+    "contract": "partial",
+    "evidence": "live-roles-spaces",
+    "notes": "ID, name, description and disabled features only."
+  },
+  {
+    "wrapper": "spaces.delete",
+    "method": "DELETE",
+    "path": "/api/spaces/space/{id}",
+    "operation_id": "delete-spaces-space-id",
+    "scope": "Global",
+    "contract": "unreviewed",
+    "evidence": "live-roles-spaces",
+    "notes": "Single space deletion; no full contract audit."
+  },
+  {
+    "wrapper": "spaces.get",
+    "method": "GET",
+    "path": "/api/spaces/space/{id}",
+    "operation_id": "get-spaces-space-id",
+    "scope": "Global",
+    "contract": "partial",
+    "evidence": "live-roles-spaces",
+    "notes": "ID, name, description and disabled features only; additional fields discarded."
+  },
+  {
+    "wrapper": "spaces.list",
+    "method": "GET",
+    "path": "/api/spaces/space",
+    "operation_id": "get-spaces-space",
+    "scope": "Global",
+    "contract": "partial",
+    "evidence": "live-roles-spaces",
+    "notes": "Core space fields only; no optional listing parameters."
+  },
+  {
+    "wrapper": "spaces.update",
+    "method": "PUT",
+    "path": "/api/spaces/space/{id}",
+    "operation_id": "put-spaces-space-id",
+    "scope": "Global",
+    "contract": "partial",
+    "evidence": "live-roles-spaces",
+    "notes": "Same limited fields as creation."
+  }
+]

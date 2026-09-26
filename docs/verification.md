@@ -42,7 +42,7 @@ Auditd Manager 1.21.0 was separately installed through the running workbench API
 
 From lightbox, a separate tailnet machine, requests to `http://homebox:8787` returned the application's health, Kibana version/status, and screenshot content successfully. Elasticsearch and Kibana remain bound to loopback. The app runs under a user systemd service, and the dedicated containers have restart policies. User lingering is enabled so the service can run without an interactive login. Reboot recovery has not been exercised.
 
-The demo account can access detection rules in `kibana-rs`. Attempts to access rules in the default space or administer Kibana roles returned HTTP 403. Browser mutations require the application's custom request header. There is no separate browser login: access to the app follows the existing tailnet policy. Package assets are deployment-wide even when installed through a space-scoped account.
+The demo account can access detection rules in `kibana-rs`. Attempts to access rules in the default space or administer Kibana roles returned HTTP 403. Browser mutations require the application's custom request header. There is no separate browser login: access to the app follows the existing tailnet policy. Package installation can affect deployment-wide Elasticsearch assets even when performed through a space-scoped account. Kibana integration assets can be space-specific. See [Fleet space behavior](https://www.elastic.co/docs/deploy-manage/manage-spaces-fleet/).
 
 ## Screenshots
 
@@ -62,4 +62,4 @@ This verifies an initial client and an isolated demonstration, not production co
 
 The demo exposes a subset of the library. Integration assignment uses package defaults, the assignment picker loads the first 50 agent policies, and a case drawer loads its first 100 comments. Package-specific settings requiring extra variables need library calls or Kibana. Recent operations are an in-memory convenience, cleared on restart, not an audit log.
 
-The GitHub Actions definition was added but has not run remotely. The repository has no remote and the crate has not been published. There has been no sustained-load, dependency-security, or Rust minimum-version compatibility certification.
+The initial GitHub Actions checks subsequently [passed for the implementation commit](https://github.com/nestyy1337/security-client-rs/actions/runs/36234667354). They compiled the crate and ran transport tests; the four live tests were deliberately ignored in that CI run. The repository is now private on GitHub, and the crate has not been published. There has been no sustained-load, dependency-security, or Rust minimum-version compatibility certification.

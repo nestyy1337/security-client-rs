@@ -1,0 +1,48 @@
+{
+  "version": "9.5.4",
+  "deployment": "traditional",
+  "url": "https://raw.githubusercontent.com/elastic/kibana/v9.5.4/oas_docs/output/kibana.yaml",
+  "sha256": "a5dd0f2a0fa30f2bdcba6b42c712b9bfcd89f22aef29c9bf5285328f014279d9",
+  "evidence": {
+    "date": "2026-09-26",
+    "kibana_version": "9.5.4",
+    "source_commit": "c5a8c31e66c11c4186fb92d05385813eddc40a6a",
+    "files": [
+      "src/cases.rs",
+      "src/client.rs",
+      "src/error.rs",
+      "src/fleet.rs",
+      "src/lib.rs",
+      "src/roles.rs",
+      "src/security.rs",
+      "src/spaces.rs",
+      "Cargo.toml",
+      "Cargo.lock",
+      "tests/live.rs",
+      "tests/browser.py"
+    ],
+    "source_sha256": "d02058d39fc2bfe827ba56b1f20017d576513b3de73cb31961642f232df8e9cb",
+    "workflows": {
+      "live-rules": {
+        "file": "tests/live.rs",
+        "symbol": "detection_rules_crud_export_import_and_space_isolation"
+      },
+      "live-cases": {
+        "file": "tests/live.rs",
+        "symbol": "security_cases_comments_and_version_conflicts"
+      },
+      "live-fleet": {
+        "file": "tests/live.rs",
+        "symbol": "fleet_policy_and_integration_lifecycle"
+      },
+      "live-roles-spaces": {
+        "file": "tests/live.rs",
+        "symbol": "roles_are_global_and_roundtrip_space_privileges"
+      },
+      "browser": {
+        "file": "tests/browser.py",
+        "symbol": "9.5.4 connected"
+      }
+    }
+  }
+}
