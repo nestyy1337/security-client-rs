@@ -1,8 +1,18 @@
 # kibana-rs
 
-An async Rust client for Kibana security operations and Fleet management, with a browser workbench that exercises the client against a real Kibana instance.
+An async Rust client for Kibana security operations and Fleet management. The optional browser workbench demonstrates the crate against a real Kibana instance.
 
 The initial implementation targets traditional Kibana **9.5.4**. It is an independent project, not an Elastic-supported client. It has not been published to crates.io.
+
+## API coverage and compatibility
+
+<!-- BEGIN API COVERAGE -->
+Against the pinned traditional **9.5.4** bundle: **49/663 named operations** (7.4% endpoint breadth), **45 recorded exercises** on 9.5.4, and **no release-certified deployment profiles**. Recorded evidence matches the current client/test inputs. Full contract parity remains unaudited.
+<!-- END API COVERAGE -->
+
+The [operation report](docs/api-coverage.md) lists every wrapper's official operation ID, contract limitations and recorded test evidence. The [coverage tracker](coverage/README.md) checks the report against a checksum-pinned upstream API bundle and the Rust source. CI does not equate a wrapper with complete parameter or response support.
+
+The next release milestone is a [reproducible deployment suite](research/reproducible-deployments.md), with locked stack and package versions, disposable data, and an enrolled Agent. That suite is proposed, not yet implemented. The demo's browser checks are separate from crate compatibility certification.
 
 ## Try the running workbench
 
@@ -51,7 +61,7 @@ The executable [security example](examples/security.rs) only reads rules and pol
 
 ### Coverage
 
-There are 49 named HTTP operations, including status. This is an operation inventory, not a promise that every operation has been exercised live.
+See the [generated inventory](docs/api-coverage.md) for current counts and per-operation limitations.
 
 | Module | Included |
 | --- | --- |
@@ -113,7 +123,7 @@ KIBANA_USERNAME=elastic KIBANA_PASSWORD=your-test-password \
 nix develop -c cargo test --test live -- --ignored --test-threads=1
 ```
 
-Do not use live tests against a production deployment. Integration package assets are cluster-wide and remain installed after temporary policies and spaces are removed. A failed assertion may also leave a test resource for inspection.
+Do not use live tests against a production deployment. Integration packages can install deployment-wide Elasticsearch assets, while Kibana assets can belong to spaces. Package installations and Elasticsearch assets remain after temporary policies and spaces are removed. A failed assertion may also leave a test resource for inspection.
 
 Browser checks use the real workbench and create/delete their own test resources:
 

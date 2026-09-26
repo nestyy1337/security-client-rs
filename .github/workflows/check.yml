@@ -3,6 +3,13 @@ on:
   push:
   pull_request:
 jobs:
+  coverage:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv run --with PyYAML==6.0.3 python -m unittest discover -s tools -p 'test_*.py'
+      - run: uv run tools/api_coverage.py --fetch --check
   rust:
     runs-on: ubuntu-latest
     steps:
