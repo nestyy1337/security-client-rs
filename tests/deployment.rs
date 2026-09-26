@@ -1,4 +1,9 @@
 //! Executed by tests/deployment/run.py against a disposable, digest-locked stack.
+use kibana_rs::exceptions::{Entry, ListSelector, NamespaceType, NewItem, NewList, Operator};
+use kibana_rs::fleet::{
+    ActionOptions, AgentActionStatus, AgentSelection, BulkActionResult, BulkAgents,
+    DiagnosticsOptions, TagUpdate, UnenrollOptions, UpgradeAgent,
+};
 use kibana_rs::{
     Auth, Client, Error, PageOptions, StatusCode,
     fleet::{AgentPolicyRequest, PackagePolicyRequest, PackageRef, PolicyInput, PolicyStream},
@@ -84,6 +89,60 @@ async fn tls_authentication_and_space_permissions() {
         "event.outcome: failure",
     );
     let rule = api_key.security().create_rule(&request).await.unwrap();
+    let exception_request = NewList::detection("Permission exception", "Owned permission fixture");
+    let exception_list = api_key
+        .exceptions()
+        .create_list(&exception_request)
+        .await
+        .unwrap();
+    assert_eq!(
+        reader
+            .exceptions()
+            .list(ListSelector::Id(&exception_list.id), NamespaceType::Single)
+            .await
+            .unwrap()
+            .id,
+        exception_list.id
+    );
+    assert_eq!(
+        reader
+            .exceptions()
+            .create_list(&exception_request)
+            .await
+            .unwrap_err()
+            .status(),
+        Some(StatusCode::FORBIDDEN)
+    );
+    assert_eq!(
+        api_key
+            .default_space()
+            .exceptions()
+            .list(ListSelector::Id(&exception_list.id), NamespaceType::Single)
+            .await
+            .unwrap_err()
+            .status(),
+        Some(StatusCode::FORBIDDEN)
+    );
+    writer
+        .exceptions()
+        .delete_list(ListSelector::Id(&exception_list.id), NamespaceType::Single)
+        .await
+        .unwrap();
+    assert_eq!(
+        reader
+            .fleet()
+            .bulk_update_agent_tags(
+                &BulkAgents::new(AgentSelection::Ids(vec!["not-an-agent".into()])),
+                &TagUpdate {
+                    tags_to_add: vec!["denied".into()],
+                    ..Default::default()
+                }
+            )
+            .await
+            .unwrap_err()
+            .status(),
+        Some(StatusCode::FORBIDDEN)
+    );
     assert_eq!(
         writer
             .security()
@@ -292,6 +351,204 @@ async fn wait_for_policy(client: &Client, agent_id: &str, policy: &str, revision
     }
 }
 
+async fn wait_for_action(client: &Client, result: BulkActionResult) -> AgentActionStatus {
+    let BulkActionResult::Action { action_id } = result else {
+        panic!("expected an action, received dry-run result")
+    };
+    let deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        let actions = client
+            .fleet()
+            .agent_actions(&ActionOptions {
+                per_page: 100,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        if let Some(action) = actions.items.into_iter().find(|a| a.action_id == action_id)
+            && matches!(
+                action.status.as_str(),
+                "COMPLETE" | "FAILED" | "CANCELLED" | "EXPIRED"
+            )
+        {
+            return action;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Action {action_id} did not finish"
+        );
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+}
+
+fn successful_action(action: &AgentActionStatus) {
+    assert_eq!(action.status, "COMPLETE", "{action:?}");
+    assert_eq!(action.nb_agents_failed, 0, "{action:?}");
+}
+
+#[tokio::test]
+#[ignore = "requires the disposable deployment runner with a real Agent"]
+async fn fleet_agent_bulk_actions_and_diagnostics() {
+    let client = admin();
+    let agent_id = env("KIBANA_TEST_AGENT_ID");
+    let peer_id = env("KIBANA_TEST_PEER_ID");
+    let mut selection = BulkAgents::new(AgentSelection::Ids(vec![agent_id.clone()]));
+    selection.batch_size = Some(1);
+    selection.dry_run = true;
+    let preview = client
+        .fleet()
+        .bulk_unenroll_agents(&selection, &UnenrollOptions::default())
+        .await
+        .unwrap();
+    assert!(matches!(preview, BulkActionResult::DryRun { count: 1 }));
+    assert_eq!(
+        client.fleet().agent(&agent_id).await.unwrap().active,
+        Some(true)
+    );
+
+    selection.dry_run = false;
+    let tags = TagUpdate {
+        tags_to_add: vec!["owned-fixture".into()],
+        ..Default::default()
+    };
+    let task = client
+        .fleet()
+        .bulk_update_agent_tags(&selection, &tags)
+        .await
+        .unwrap();
+    successful_action(&wait_for_action(&client, task).await);
+    assert!(
+        client.fleet().agent(&agent_id).await.unwrap().extra["tags"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("owned-fixture"))
+    );
+
+    let target = client
+        .fleet()
+        .agent_policy("fixture-agent-target")
+        .await
+        .unwrap();
+    let both = BulkAgents::new(AgentSelection::Ids(vec![agent_id.clone(), peer_id.clone()]));
+    let task = client
+        .fleet()
+        .bulk_reassign_agents(&both, &target.id, false)
+        .await
+        .unwrap();
+    let partial = wait_for_action(&client, task).await;
+    assert_eq!(partial.status, "FAILED", "{partial:?}");
+    assert_eq!(partial.nb_agents_failed, 1, "{partial:?}");
+    assert_eq!(partial.nb_agents_ack, 1, "{partial:?}");
+    assert!(
+        partial
+            .latest_errors
+            .iter()
+            .any(|e| e["agentId"] == peer_id),
+        "{partial:?}"
+    );
+    wait_for_policy(&client, &agent_id, &target.id, target.revision).await;
+
+    let repeated = client
+        .fleet()
+        .bulk_reassign_agents(&selection, &target.id, false)
+        .await
+        .unwrap_err();
+    assert_eq!(repeated.status(), Some(StatusCode::BAD_REQUEST));
+    assert!(repeated.body().unwrap().contains("No agents to reassign"));
+
+    let original = client.fleet().agent_policy("fixture-agent").await.unwrap();
+    let task = client
+        .fleet()
+        .bulk_reassign_agents(&selection, &original.id, false)
+        .await
+        .unwrap();
+    successful_action(&wait_for_action(&client, task).await);
+    wait_for_policy(&client, &agent_id, &original.id, original.revision).await;
+
+    let by_query = BulkAgents {
+        agents: AgentSelection::Query("policy_id:fixture-agent".into()),
+        dry_run: true,
+        batch_size: None,
+    };
+    assert!(matches!(
+        client
+            .fleet()
+            .bulk_request_agent_diagnostics(&by_query, &DiagnosticsOptions::default())
+            .await
+            .unwrap(),
+        BulkActionResult::DryRun { count: 1 }
+    ));
+    let diagnostics = client
+        .fleet()
+        .request_agent_diagnostics(&agent_id, &DiagnosticsOptions::default())
+        .await
+        .unwrap();
+    let action = wait_for_action(&client, diagnostics).await;
+    successful_action(&action);
+    let deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        let uploads = client.fleet().agent_uploads(&agent_id).await.unwrap();
+        if let Some(upload) = uploads
+            .items
+            .into_iter()
+            .find(|u| u.action_id == action.action_id)
+        {
+            assert_ne!(upload.status, "FAILED", "{upload:?}");
+            if upload.status == "READY" {
+                let response = client
+                    .fleet()
+                    .download_agent_file(&upload.id, &upload.name)
+                    .await
+                    .unwrap();
+                let bytes = response.bytes().await.unwrap();
+                assert!(
+                    bytes.starts_with(b"PK"),
+                    "diagnostics must be a ZIP archive"
+                );
+                break;
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Diagnostics upload did not become READY"
+        );
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+
+    let upgrade = client
+        .fleet()
+        .upgrade_agent(&agent_id, &UpgradeAgent::new(env("KIBANA_TEST_VERSION")))
+        .await
+        .unwrap_err();
+    assert_eq!(upgrade.status(), Some(StatusCode::BAD_REQUEST));
+    assert!(
+        upgrade.body().unwrap().contains("not upgradeable"),
+        "{upgrade:?}"
+    );
+
+    let tags = TagUpdate {
+        tags_to_remove: vec!["owned-fixture".into()],
+        ..Default::default()
+    };
+    successful_action(
+        &wait_for_action(
+            &client,
+            client
+                .fleet()
+                .bulk_update_agent_tags(&selection, &tags)
+                .await
+                .unwrap(),
+        )
+        .await,
+    );
+    assert!(
+        !client.fleet().agent(&agent_id).await.unwrap().extra["tags"]
+            .as_array()
+            .unwrap()
+            .contains(&json!("owned-fixture"))
+    );
+}
+
 #[tokio::test]
 #[ignore = "requires the disposable deployment runner with a real Agent"]
 async fn agent_policy_delivery_ingestion_reassignment_and_unenrollment() {
@@ -386,7 +643,87 @@ async fn agent_policy_delivery_ingestion_reassignment_and_unenrollment() {
     request.enabled = true;
     request.interval = "1m".into();
     request.from = "now-15m".into();
+    let exception_list = client
+        .exceptions()
+        .create_list(&NewList::detection(
+            "Suppress fixture",
+            "Verify exceptions affect execution",
+        ))
+        .await
+        .unwrap();
+    client
+        .exceptions()
+        .create_item(&NewItem::new(
+            &exception_list,
+            "Events containing a message",
+            vec![Entry::Exists {
+                field: "message".into(),
+                operator: Operator::Included,
+            }],
+        ))
+        .await
+        .unwrap();
+    request.exceptions_list = vec![exception_list.reference()];
     let rule = client.security().create_rule(&request).await.unwrap();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        let current = client
+            .security()
+            .rule(RuleSelector::Id(&rule.id))
+            .await
+            .unwrap();
+        let execution = current
+            .extra
+            .get("execution_summary")
+            .and_then(|summary| summary.get("last_execution"))
+            .unwrap_or(&Value::Null);
+        if execution["status"] == "succeeded" {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Rule did not execute with exceptions: {execution}"
+        );
+        tokio::time::sleep(Duration::from_secs(2)).await;
+    }
+    let refresh = reqwest::Client::builder()
+        .add_root_certificate(ca())
+        .timeout(Duration::from_secs(30))
+        .build()
+        .unwrap()
+        .post(format!(
+            "{}/.alerts-security.alerts-default/_refresh",
+            env("ELASTICSEARCH_URL")
+        ))
+        .basic_auth("elastic", Some(env("KIBANA_PASSWORD")))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(refresh["_shards"]["failed"], 0);
+    assert_eq!(
+        search(
+            ".alerts-security.alerts-default",
+            json!({"term": {"kibana.alert.rule.rule_id": rule.rule_id}})
+        )
+        .await,
+        0
+    );
+    client
+        .security()
+        .update_rule(
+            RuleSelector::Id(&rule.id),
+            &RulePatch {
+                exceptions_list: Some(vec![]),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
     let deadline = Instant::now() + Duration::from_secs(180);
     while search(
         ".alerts-security.alerts-default",
@@ -439,7 +776,13 @@ async fn agent_policy_delivery_ingestion_reassignment_and_unenrollment() {
         .await
         .unwrap();
     wait_for_policy(&client, &agent_id, &target.id, target.revision).await;
-    client.fleet().unenroll_agent(&agent_id).await.unwrap();
+    let selection = BulkAgents::new(AgentSelection::Ids(vec![agent_id.clone()]));
+    let unenroll = client
+        .fleet()
+        .bulk_unenroll_agents(&selection, &UnenrollOptions::default())
+        .await
+        .unwrap();
+    successful_action(&wait_for_action(&client, unenroll).await);
     let deadline = Instant::now() + Duration::from_secs(180);
     while client.fleet().agent(&agent_id).await.unwrap().active != Some(false) {
         assert!(
@@ -451,6 +794,11 @@ async fn agent_policy_delivery_ingestion_reassignment_and_unenrollment() {
     client
         .fleet()
         .delete_package_policy(&package.id)
+        .await
+        .unwrap();
+    client
+        .exceptions()
+        .delete_list(ListSelector::Id(&exception_list.id), NamespaceType::Single)
         .await
         .unwrap();
     client

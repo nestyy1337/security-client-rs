@@ -7,12 +7,12 @@ The initial implementation targets traditional Kibana 9.x. It is an independent 
 ## API coverage and compatibility
 
 <!-- BEGIN API COVERAGE -->
-Against the pinned traditional **9.5.4** bundle: **49/663 named operations** (7.4% endpoint breadth), **45 recorded exercises** on 9.5.4, and **no release-certified deployment profiles**. Recorded evidence is STALE for the current client/test inputs. Full contract parity remains unaudited.
+Against the pinned traditional **9.5.4** bundle: **78/663 named operations** (11.8% endpoint breadth), **45 recorded exercises** on 9.5.4, and **no release-certified deployment profiles**. Recorded evidence is STALE for the current client/test inputs. Full contract parity remains unaudited.
 <!-- END API COVERAGE -->
 
 The [operation report](docs/api-coverage.md) lists every wrapper's official operation ID, contract limitations and recorded test evidence. The [coverage tracker](coverage/README.md) checks the report against a checksum-pinned upstream API bundle and the Rust source. CI does not equate a wrapper with complete parameter or response support.
 
-The [deployment suite](tests/deployment/README.md) runs seven required scenarios against disposable **9.5.4** and **9.4.7** profiles, including a real Fleet Server and managed Agent. Images and signed packages are checksum-locked. GitHub Actions retains per-profile results and logs. These selected workflows are separate from full API contract parity and packaged-release certification. The older operation-level evidence above remains a historical record.
+The [deployment suite](tests/deployment/README.md) runs ten required scenarios against disposable **9.5.4** and **9.4.7** profiles, including a real Fleet Server and two managed Agents. Images and signed packages are checksum-locked. GitHub Actions retains per-profile results and logs. These selected workflows are separate from full API contract parity and packaged-release certification. The older operation-level evidence above remains a historical record.
 
 ## Try the running workbench
 
@@ -67,13 +67,26 @@ See the [generated inventory](docs/api-coverage.md) for current counts and per-o
 | --- | --- |
 | `security()` | Query-rule creation, list/get/patch/delete, rule import/export, privilege inspection, alert-index initialization |
 | `cases()` | Search/get/create/update/delete, comments, optimistic concurrency through case versions |
-| `fleet()` | Agent policy CRUD/copy/download; package policy CRUD; integration catalogue/details/install/uninstall; agent list/get/reassign/unenroll; status and outputs |
+| `exceptions()` | List/item CRUD and pagination; typed conditions; optimistic concurrency; duplicate/import/export and OS summaries |
+| `fleet()` | Policies and integrations; enrollment tokens; individual/bulk agent operations; upgrades, diagnostics, action history and binary downloads; status and output listing |
 | `spaces()` | Global space CRUD/list |
 | `roles()` | Global role list/get/put/delete with Kibana privileges |
 
 Stable resource fields have Rust types. Responses retain additional fields where they matter for extensibility. Integration input variables and Elasticsearch privilege definitions remain JSON because their schemas depend on the package or Elasticsearch. Query-rule creation supports KQL and Lucene. Other detection-rule types can be read, patched in common fields, imported/exported, or created through the raw request API; they do not yet have dedicated creation types.
 
 Pagination is explicit. `rules`, `find`, and Fleet collection methods return one page and a total. Do not interpret the first page as the complete collection.
+
+### Exceptions and agent operations
+
+`client.exceptions()` manages detection exception lists and items. Entries support match, match-any, exists, wildcard, value-list references and nested conditions. `NamespaceType::Single` isolates lists to the selected Kibana space; `Agnostic` shares them across spaces. Updates require an explicit opaque `_version` token from the last read, separately from the optional user-defined numeric version.
+
+Attach `list.reference()` through `QueryRule::exceptions_list` or `RulePatch::exceptions_list`. Patching this array replaces all associations, so preserve the references you want to keep. An empty array detaches every list. Exception import preserves per-object errors even on HTTP 200. Export requires both the saved-object ID and `list_id`, provided by `ListReference`. Imports can regenerate saved-object IDs; read back by `list_id`/`item_id` before reusing references. Referenced value-list contents need separate management and are not included in exports. Kibana's OS summary can report zero without OS-labelled items; `items().total` is the item count.
+
+Fleet bulk methods accept explicit IDs or a KQL query through `BulkAgents`. Set `dry_run = true` to get the selected count. Dry runs do not validate every agent's eligibility. Actual submissions return an action ID; inspect `agent_actions()` for completion, failure counts and sampled errors, then verify the agent state. Action-history pages start at zero; collection pages start at one.
+
+Enrollment keys support policy selection, names, expiry, listing and revocation. Their `Debug` output redacts credentials. Revoking an enrollment key does not unenroll existing agents. Diagnostics requests are asynchronous: correlate the action ID with `agent_uploads()`, wait for `READY`, then stream `download_agent_file()`. Diagnostic archives can contain sensitive configuration.
+
+Upgrade and cancellation methods have wire-contract tests, but the container fixture cannot prove a successful binary upgrade. Cancellation applies to upgrades and unenrollment, not arbitrary actions. Scheduled upgrade behavior and successful cancellation need a service-installed Agent and the relevant license profile. See the [contract research](research/fleet-agent-operations.md) and [deployment test limits](tests/deployment/README.md).
 
 ### Request behavior
 
@@ -137,7 +150,7 @@ The [Check workflow](.github/workflows/check.yml) runs formatting, linting, tran
 
 ## Compatibility limits
 
-The initial deployment matrix covers selected workflows on fresh self-managed 9.5.4 and 9.4.7 installations with Basic licensing. It does not cover 8.x, Serverless, Cloud Hosted, deployment upgrades, paid features, mixed-version agents, ARM or Fleet-managed binary upgrades. A release still needs verification against its packaged source and minimum Rust version. EQL/threshold rule builders, exception-list helpers, response actions, generic alerting, connectors, data views, and saved-object transfer remain outside this first implementation. The raw request API is available for those cases.
+The initial deployment matrix covers selected workflows on fresh self-managed 9.5.4 and 9.4.7 installations with Basic licensing. It does not cover 8.x, Serverless, Cloud Hosted, deployment upgrades, paid features, mixed-version agents, ARM or Fleet-managed binary upgrades. A release still needs verification against its packaged source and minimum Rust version. EQL/threshold rule builders, value-list storage management, Endpoint artifact-specific validation, response actions, generic alerting, connectors, data views, and saved-object transfer remain outside this implementation. The raw request API is available for those cases.
 
 The [API investigation](research/api-feasibility.md) and [existing-client survey](research/existing-clients.md) preserve the pre-implementation findings. This code is handwritten; no upstream OpenAPI bundle, server source, or generated binding was copied into the crate. The initial research's future scope is superseded by this security/Fleet-first release.
 

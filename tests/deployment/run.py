@@ -27,10 +27,13 @@ SCENARIOS = {
         "security_cases_comments_and_version_conflicts",
         "fleet_policy_and_integration_lifecycle",
         "roles_are_global_and_roundtrip_space_privileges",
+        "exception_lists_items_roundtrip_conflicts_and_spaces",
+        "fleet_enrollment_key_lifecycle_and_pagination",
     ],
     "deployment": [
         "tls_authentication_and_space_permissions",
         "pagination_returns_all_owned_rules",
+        "fleet_agent_bulk_actions_and_diagnostics",
         "agent_policy_delivery_ingestion_reassignment_and_unenrollment",
     ],
 }
@@ -285,6 +288,9 @@ class Deployment:
         enrollment = self.api("kibana", "/api/fleet/enrollment_api_keys", "POST", {"policy_id": "fixture-agent"})["item"]["api_key"]
         self.secret_values.append(enrollment)
         self.environment["ENROLLMENT_TOKEN"] = enrollment
+        peer_enrollment = self.api("kibana", "/api/fleet/enrollment_api_keys", "POST", {"policy_id": "fixture-agent-target"})["item"]["api_key"]
+        self.secret_values.append(peer_enrollment)
+        self.environment["PEER_ENROLLMENT_TOKEN"] = peer_enrollment
         directory = self.directory / "logs"
         directory.mkdir(mode=0o755)
         self.marker = "fixture-" + uuid.uuid4().hex
@@ -293,9 +299,10 @@ class Deployment:
         (directory / "system.log").chmod(0o644)
         self.compose("up", "-d", "fleet-server", timeout=900)
         server = self.wait("Fleet Server check-in", lambda: next((a for a in self.api("kibana", "/api/fleet/agents")["items"] if a.get("policy_id") == "fixture-server" and a.get("status") == "online"), None), timeout=300)
-        self.compose("up", "-d", "agent", timeout=900)
+        self.compose("up", "-d", "agent", "agent-peer", timeout=900)
         agent = self.wait("managed Agent check-in", lambda: next((a for a in self.api("kibana", "/api/fleet/agents")["items"] if a.get("policy_id") == "fixture-agent" and a.get("status") == "online"), None), timeout=240)
-        for enrolled in [server, agent]:
+        peer = self.wait("peer Agent check-in", lambda: next((a for a in self.api("kibana", "/api/fleet/agents")["items"] if a.get("policy_id") == "fixture-agent-target" and a.get("status") == "online"), None), timeout=240)
+        for enrolled in [server, agent, peer]:
             if enrolled["local_metadata"]["elastic"]["agent"]["version"] != self.profile["version"]:
                 raise RuntimeError("Enrolled Agent version differs from profile")
         self.compose("restart", "agent")
@@ -308,7 +315,7 @@ class Deployment:
             and datetime.fromisoformat(a["last_checkin"]) > restarted_at
             for a in self.api("kibana", "/api/fleet/agents")["items"]), timeout=180)
         self.report["agent_restart"] = "passed"
-        self.environment.update({"KIBANA_TEST_AGENT_ID": agent["id"], "KIBANA_TEST_MARKER": self.marker})
+        self.environment.update({"KIBANA_TEST_AGENT_ID": agent["id"], "KIBANA_TEST_PEER_ID": peer["id"], "KIBANA_TEST_MARKER": self.marker})
 
     def scenario(self, binary, name):
         print(f"Running: {name}", flush=True)
@@ -372,7 +379,8 @@ def main():
             for name in SCENARIOS["deployment"][:2]:
                 deployment.scenario("deployment", name)
             deployment.agents()
-            deployment.scenario("deployment", SCENARIOS["deployment"][-1])
+            for name in SCENARIOS["deployment"][2:]:
+                deployment.scenario("deployment", name)
             deployment.report["status"] = "passed"
             code = 0
         except KeyboardInterrupt:

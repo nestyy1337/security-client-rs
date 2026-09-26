@@ -1,4 +1,9 @@
 //! Run only against a disposable, dedicated Kibana deployment.
+use kibana_rs::exceptions::{
+    Entry, FindOptions, ItemSelector, ListSelector, NamespaceType, NewItem, NewList, Operator,
+    UpdateItem, UpdateList,
+};
+use kibana_rs::fleet::NewEnrollmentKey;
 use kibana_rs::{
     Auth, Client, PageOptions, Result,
     cases::{CasePatch, CaseStatus, FindCases, NewCase},
@@ -36,6 +41,363 @@ async fn space(root: &Client) -> (String, Client) {
         .unwrap();
     let scoped = root.space(&id).unwrap();
     (id, scoped)
+}
+
+#[tokio::test]
+#[ignore = "requires a dedicated live Kibana deployment"]
+async fn exception_lists_items_roundtrip_conflicts_and_spaces() {
+    let root = client();
+    let (space_id, client) = space(&root).await;
+    let ns = NamespaceType::Single;
+    let result: Result<()> = async {
+        let mut definition = NewList::detection("Known scanners", "Owned exception fixture");
+        definition.list_id = Some(format!("scanner-{}", uuid::Uuid::new_v4()));
+        let list = client.exceptions().create_list(&definition).await?;
+        assert_eq!(
+            client
+                .exceptions()
+                .list(ListSelector::ListId(&list.list_id), ns)
+                .await?
+                .id,
+            list.id
+        );
+        assert_eq!(
+            root.exceptions()
+                .list(ListSelector::Id(&list.id), ns)
+                .await
+                .unwrap_err()
+                .status()
+                .unwrap()
+                .as_u16(),
+            404
+        );
+
+        definition.name = "Approved scanners".into();
+        let revision = list.revision.as_deref().expect("list concurrency token");
+        let updated = client
+            .exceptions()
+            .update_list(&UpdateList {
+                id: &list.id,
+                revision,
+                definition: &definition,
+            })
+            .await?;
+        assert_eq!(updated.name, definition.name);
+        assert_eq!(
+            client
+                .exceptions()
+                .update_list(&UpdateList {
+                    id: &list.id,
+                    revision,
+                    definition: &definition
+                })
+                .await
+                .unwrap_err()
+                .status()
+                .unwrap()
+                .as_u16(),
+            409
+        );
+
+        let mut item_definition = NewItem::new(
+            &list,
+            "Scanner host",
+            vec![Entry::Match {
+                field: "host.name".into(),
+                operator: Operator::Included,
+                value: "scanner-1".into(),
+            }],
+        );
+        item_definition.item_id = Some(format!("scanner-item-{}", uuid::Uuid::new_v4()));
+        item_definition.os_types = vec![kibana_rs::exceptions::OsType::Linux];
+        let item = client.exceptions().create_item(&item_definition).await?;
+        assert_eq!(
+            client
+                .exceptions()
+                .item(ItemSelector::ItemId(&item.item_id), ns)
+                .await?
+                .id,
+            item.id
+        );
+        assert_eq!(
+            root.exceptions()
+                .item(ItemSelector::Id(&item.id), ns)
+                .await
+                .unwrap_err()
+                .status()
+                .unwrap()
+                .as_u16(),
+            404
+        );
+        item_definition.name = "Renamed scanner".into();
+        let revision = item.revision.as_deref().expect("item concurrency token");
+        let updated = client
+            .exceptions()
+            .update_item(&UpdateItem {
+                id: &item.id,
+                revision,
+                definition: &item_definition,
+            })
+            .await?;
+        assert_eq!(updated.name, item_definition.name);
+        assert_eq!(
+            client
+                .exceptions()
+                .update_item(&UpdateItem {
+                    id: &item.id,
+                    revision,
+                    definition: &item_definition
+                })
+                .await
+                .unwrap_err()
+                .status()
+                .unwrap()
+                .as_u16(),
+            409
+        );
+
+        let second = client
+            .exceptions()
+            .create_item(&NewItem::new(
+                &list,
+                "Other scanner",
+                vec![Entry::MatchAny {
+                    field: "host.name".into(),
+                    operator: Operator::Included,
+                    value: vec!["scanner-2".into(), "scanner-3".into()],
+                }],
+            ))
+            .await?;
+        let first_page = client
+            .exceptions()
+            .items(
+                &list.list_id,
+                ns,
+                &FindOptions {
+                    per_page: 1,
+                    sort_field: Some("name".into()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        let second_page = client
+            .exceptions()
+            .items(
+                &list.list_id,
+                ns,
+                &FindOptions {
+                    page: 2,
+                    per_page: 1,
+                    sort_field: Some("name".into()),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(first_page.total, 2);
+        assert_ne!(first_page.data[0].id, second_page.data[0].id);
+        assert_eq!(
+            client
+                .exceptions()
+                .summary(ListSelector::Id(&list.id), ns)
+                .await?["total"],
+            2
+        );
+
+        let duplicate = client
+            .exceptions()
+            .duplicate_list(&list.list_id, ns, true)
+            .await?;
+        assert_ne!(duplicate.list_id, list.list_id);
+        assert_eq!(
+            client
+                .exceptions()
+                .items(&duplicate.list_id, ns, &FindOptions::default())
+                .await?
+                .total,
+            2
+        );
+        assert_eq!(
+            client
+                .exceptions()
+                .lists(
+                    ns,
+                    &FindOptions {
+                        per_page: 1,
+                        ..Default::default()
+                    }
+                )
+                .await?
+                .total,
+            2
+        );
+        client
+            .exceptions()
+            .delete_list(ListSelector::Id(&duplicate.id), ns)
+            .await?;
+
+        let export = client
+            .exceptions()
+            .export_list(&list.reference(), true)
+            .await?
+            .bytes()
+            .await?;
+        let conflict = client
+            .exceptions()
+            .import_lists(export.to_vec(), false, false)
+            .await?;
+        assert!(!conflict.success);
+        assert!(!conflict.errors.is_empty());
+        let overwrite = client
+            .exceptions()
+            .import_lists(export.to_vec(), true, false)
+            .await?;
+        assert!(overwrite.success, "{overwrite:?}");
+        let list = client
+            .exceptions()
+            .list(ListSelector::ListId(&list.list_id), ns)
+            .await?;
+        let item = client
+            .exceptions()
+            .item(ItemSelector::ItemId(&item.item_id), ns)
+            .await?;
+
+        let mut rule = QueryRule::new(
+            "Rule with shared exceptions",
+            "Exception association",
+            "host.name: scanner-1",
+        );
+        rule.exceptions_list = vec![list.reference()];
+        let rule = client.security().create_rule(&rule).await?;
+        assert_eq!(rule.extra["exceptions_list"][0]["list_id"], list.list_id);
+        let detached = client
+            .security()
+            .update_rule(
+                RuleSelector::Id(&rule.id),
+                &RulePatch {
+                    exceptions_list: Some(vec![]),
+                    ..Default::default()
+                },
+            )
+            .await?;
+        assert_eq!(detached.extra["exceptions_list"], serde_json::json!([]));
+        client
+            .security()
+            .delete_rule(RuleSelector::Id(&rule.id))
+            .await?;
+
+        client
+            .exceptions()
+            .delete_item(ItemSelector::ItemId(&second.item_id), ns)
+            .await?;
+        client
+            .exceptions()
+            .delete_item(ItemSelector::Id(&item.id), ns)
+            .await?;
+        client
+            .exceptions()
+            .delete_list(ListSelector::Id(&list.id), ns)
+            .await?;
+        let imported = client
+            .exceptions()
+            .import_lists(export.to_vec(), false, false)
+            .await?;
+        assert!(imported.success, "{imported:?}");
+        assert_eq!(
+            client
+                .exceptions()
+                .items(&list.list_id, ns, &FindOptions::default())
+                .await?
+                .total,
+            2
+        );
+        client
+            .exceptions()
+            .delete_list(ListSelector::ListId(&list.list_id), ns)
+            .await?;
+
+        let mut shared = NewList::detection("Cross-space exception fixture", "Shared namespace");
+        shared.namespace_type = NamespaceType::Agnostic;
+        let shared = client.exceptions().create_list(&shared).await?;
+        let visible = root
+            .exceptions()
+            .list(ListSelector::Id(&shared.id), NamespaceType::Agnostic)
+            .await;
+        let cleanup = client
+            .exceptions()
+            .delete_list(ListSelector::Id(&shared.id), NamespaceType::Agnostic)
+            .await;
+        assert_eq!(visible?.id, shared.id);
+        cleanup?;
+        Ok(())
+    }
+    .await;
+    let cleanup = root.spaces().delete(&space_id).await;
+    result.unwrap();
+    cleanup.unwrap();
+}
+
+#[tokio::test]
+#[ignore = "requires a dedicated live Kibana deployment"]
+async fn fleet_enrollment_key_lifecycle_and_pagination() {
+    let root = client();
+    let (space_id, client) = space(&root).await;
+    let result: Result<()> = async {
+        client.fleet().setup().await?;
+        let policy = client
+            .fleet()
+            .create_agent_policy(&AgentPolicyRequest::new("Enrollment fixture", "fixture"))
+            .await?;
+        let mut keys = vec![];
+        for index in 0..2 {
+            let key = client
+                .fleet()
+                .create_enrollment_key(&NewEnrollmentKey {
+                    policy_id: policy.id.clone(),
+                    name: Some(format!("krs-test-key-{index}")),
+                    expiration: Some("24h".into()),
+                })
+                .await?;
+            assert!(key.active);
+            assert!(!key.api_key.is_empty());
+            assert!(key.expire_at.is_some());
+            assert!(!format!("{key:?}").contains(&key.api_key));
+            assert_eq!(
+                client
+                    .fleet()
+                    .enrollment_key(&key.id)
+                    .await?
+                    .policy_id
+                    .as_deref(),
+                Some(policy.id.as_str())
+            );
+            keys.push(key);
+        }
+        let options = PageOptions {
+            per_page: 1,
+            kuery: Some(format!(
+                "policy_id:\"{}\" AND name:krs-test-key-*",
+                policy.id
+            )),
+            ..Default::default()
+        };
+        let first = client.fleet().enrollment_keys(&options).await?;
+        let second = client
+            .fleet()
+            .enrollment_keys(&PageOptions { page: 2, ..options })
+            .await?;
+        assert_eq!(first.total, 2);
+        assert_ne!(first.items[0].id, second.items[0].id);
+        for key in keys {
+            client.fleet().revoke_enrollment_key(&key.id).await?;
+            assert!(!client.fleet().enrollment_key(&key.id).await?.active);
+        }
+        client.fleet().delete_agent_policy(&policy.id).await?;
+        Ok(())
+    }
+    .await;
+    let cleanup = root.spaces().delete(&space_id).await;
+    result.unwrap();
+    cleanup.unwrap();
 }
 
 #[tokio::test]
