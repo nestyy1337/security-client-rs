@@ -1,92 +1,135 @@
 # kibana-rs
 
-Research and proposal for a Rust client for Kibana's public HTTP APIs.
+An async Rust client for Kibana security operations and Fleet management, with a browser workbench that exercises the client against a real Kibana instance.
 
-Status as of 2026-09-26: local Git repository with research only. There is no Rust implementation, Cargo project, generated client, or published package.
+The initial implementation targets traditional Kibana **9.5.4**. It is an independent project, not an Elastic-supported client. It has not been published to crates.io.
 
-## Recommendation
+## Try the running workbench
 
-Proceed with a focused, typed automation client. A solid first release is plausible for one maintainer if it has a small compatibility matrix and publishes its omissions. Supporting every Kibana feature would turn this into a much larger project.
+On Szymon's Tailscale network: **http://homebox:8787**. The IP fallback is http://100.115.129.28:8787.
 
-I interpret the intended scope as reliable common operations, with specialist features allowed to remain missing. I would not assume Fleet, Security, or reporting are unimportant to everyone. Add those when there is a concrete consumer and someone can test them.
+The workbench runs on homebox against a dedicated Elasticsearch/Kibana 9.5.4 stack. It can create and edit query detection rules, enable/disable them, manage security cases and notes, create agent policies, browse/install integrations, and assign integrations to policies. Changes are real, confined to this demonstration deployment. The initial rules and cases are labelled demonstration resources.
 
-The reason to build is a reusable Rust API for application code, with predictable errors, streaming transfers, and tested version support. HTTP wrappers alone would offer little over existing tools. Technical feasibility is supported by this research; broad market demand is not established.
+The app uses a Kibana user restricted to the `kibana-rs` space. Backend credentials never reach the browser. Network access is controlled by the existing tailnet policy; the demo has no separate browser login. It binds only to the host's Tailscale IP. Elasticsearch and Kibana themselves bind only to loopback on ports 19200 and 15601.
 
-## Existing alternatives
+There are no enrolled agents or production events. Fleet Server provisioning, agent enrollment, and actual telemetry collection are outside this demonstration. No dashboard authoring APIs were implemented.
 
-| Project | What it tells us |
+## Library
+
+Use the local package as a dependency until it is published:
+
+```toml
+[dependencies]
+kibana-rs = { path = "../kibana-rs" }
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+```
+
+```rust
+use kibana_rs::{Auth, Client, PageOptions, security::{FindRules, QueryRule}};
+
+async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    let client = Client::builder(std::env::var("KIBANA_URL")?)
+        .auth(Auth::ApiKey(std::env::var("KIBANA_API_KEY")?))
+        .build()?
+        .space("soc")?;
+
+    let rules = client.security().rules(&FindRules::default()).await?;
+    let policies = client.fleet().agent_policies(&PageOptions::default()).await?;
+
+    let request = QueryRule::new(
+        "Failed authentication",
+        "Review failed authentication events",
+        "event.category: authentication and event.outcome: failure",
+    );
+    let rule = client.security().create_rule(&request).await?;
+    assert!(!rule.enabled);
+    Ok(())
+}
+```
+
+The executable [security example](examples/security.rs) only reads rules and policies. Run it with `nix develop -c cargo run --example security`, supplying `KIBANA_URL`, `KIBANA_SPACE`, and either `KIBANA_API_KEY` or `KIBANA_USERNAME`/`KIBANA_PASSWORD`.
+
+### Coverage
+
+There are 49 named HTTP operations, including status. This is an operation inventory, not a promise that every operation has been exercised live.
+
+| Module | Included |
 | --- | --- |
-| [`kibana-sync`](https://crates.io/crates/kibana-sync), Rust, 0.4.1 | Already solves artifact synchronization and exposes reusable components. Prefer it if the need is moving saved objects or related artifacts. Its ETL model does not cover the proposed general alerting, connector, and data-view client. |
-| [`kibana-py`](https://pypi.org/project/kibana-py/), Python, 0.6.0 | A broad community client already exists. Its published testing policy is a useful maintenance model. Rust would need to justify itself through integration and typed behavior, not novelty. |
-| [Elastic Terraform provider](https://github.com/elastic/terraform-provider-elasticstack/tree/main/generated/kbapi), Go | Strong evidence that curated generation works, but requires an allowlist and ongoing schema repairs. |
-| [`go-kibana-rest`](https://github.com/disaster37/go-kibana-rest), Go | A narrower client, with 25 operations across seven groups in the inspected source and a stated 7.x/8.x target. |
+| `security()` | Query-rule creation, list/get/patch/delete, rule import/export, privilege inspection, alert-index initialization |
+| `cases()` | Search/get/create/update/delete, comments, optimistic concurrency through case versions |
+| `fleet()` | Agent policy CRUD/copy/download; package policy CRUD; integration catalogue/details/install/uninstall; agent list/get/reassign/unenroll; status and outputs |
+| `spaces()` | Global space CRUD/list |
+| `roles()` | Global role list/get/put/delete with Kibana privileges |
 
-See [the client comparison](research/existing-clients.md) for source-level coverage, activity, test evidence, and limitations. Version numbers above were checked in package registries on the research date.
+Stable resource fields have Rust types. Responses retain additional fields where they matter for extensibility. Integration input variables and Elasticsearch privilege definitions remain JSON because their schemas depend on the package or Elasticsearch. Query-rule creation supports KQL and Lucene. Other detection-rule types can be read, patched in common fields, imported/exported, or created through the raw request API; they do not yet have dedicated creation types.
 
-## Proposed first release
+Pagination is explicit. `rules`, `find`, and Fleet collection methods return one page and a total. Do not interpret the first page as the complete collection.
 
-Aim for roughly 45 to 60 deliberately selected operations, not an arbitrary percentage of Kibana. The final count depends on which rule controls and data-view helpers earn a place.
+### Request behavior
 
-| Area | First release |
-| --- | --- |
-| Connection | API key, Basic, and caller-supplied Bearer credentials; TLS and custom CA support; timeouts; proxy base paths; global and space-scoped requests |
-| Status and spaces | Status, space CRUD, and a small set of object-transfer helpers |
-| Data views | CRUD, default data view, and runtime fields |
-| Saved objects | Streaming export, multipart import, import-error resolution, and full partial-failure results |
-| Alerting | Rule CRUD/list, rule types, enable/disable, selected mute/snooze controls, and API key refresh |
-| Connectors | CRUD/list, connector types, and execution; extensible configuration and secret payloads |
-| Roles | Core Kibana role administration |
-| Unsupported operations | An explicit raw-request API using the same authentication, routing, and error handling |
+- API key, Basic, and Bearer authentication; custom root certificates and headers; request/connect timeouts.
+- Space selection shares the connection pool. Global routes remain global. URL construction preserves reverse-proxy base paths and encodes each resource identifier separately.
+- No automatic redirects or retries. An interrupted mutation can have an unknown outcome and must be reconciled by the caller.
+- JSON responses have a configurable 32 MiB default limit. Errors retain HTTP status, headers, and at most 16 KiB of body. Error bodies may contain operational data.
+- Rule exports and policy downloads return streaming `reqwest::Response` values. Rule import preserves partial-failure results even on HTTP 200.
+- `request(method, scope, segments)` exposes the configured HTTP client. Pass the resulting builder to `execute` for checked streaming responses or `json` for bounded decoding. It also supports endpoints without a named wrapper.
 
-Dashboard transfer is covered by saved-object export/import. New dashboard authoring is a later, 9.5-specific addition. Generic saved-object CRUD is deprecated, and the main OpenAPI bundle lacks the full dashboard schemas. Neither should form the foundation of a new authoring API. [API investigation](research/api-feasibility.md).
+Date-based `elastic-api-version` headers can be supplied through `ClientBuilder::headers` when a particular deployment or endpoint requires one. No blanket Serverless compatibility is claimed.
 
-Cases and Security detection rules are sensible next modules if incident automation is the intended consumer. Security detection rules are distinct from generic Kibana alerting rules and need their own models and tests. Fleet can follow as a separate demand-driven addition.
+## Run your own isolated demo
 
-Defer Serverless certification, 8.x support, detailed Lens authoring, reporting, Synthetics, APM, ML, AI/agent features, and private UI endpoints. Elasticsearch search/indexing and OpenSearch Dashboards belong outside this project's initial scope. A CLI and a desired-state reconciliation engine would also be separate work.
+Requirements: Nix with flakes, Docker Compose, and a user systemd manager. Rootless Docker is detected. These scripts create only the `kibana-rs-demo` Compose project and `kibana-rs-demo.service`. Expect several GiB of memory and image storage.
 
-## Rust approach
+```sh
+nix develop -c bash deploy/start-stack.sh
+KIBANA_RS_BIND="$(tailscale ip -4):8787" nix develop -c bash deploy/start-demo.sh
+```
 
-Use an async library with `reqwest` and `serde`, one shared connection pool, and small domain modules. Keep deployment configuration and space selection explicit. Do not introduce a pluggable transport framework or a blocking API until a consumer needs one.
+Omit `KIBANA_RS_BIND` to bind the workbench to `127.0.0.1:8787`. Do not bind this demonstration app to a public interface. The Tailscale deployment relies on the tailnet's existing access rules.
 
-Write the initial public request and response types deliberately. Type stable resource fields and operation results; leave plugin-specific rule parameters and connector configuration extensible through JSON or caller-defined serializable types. Distinguish absent fields from explicit null when update semantics require it. Response decoding must tolerate new fields and unknown extensible values without silently discarding failure details.
+The scripts generate credentials under `~/.local/state/kibana-rs` with restricted file permissions. `KIBANA_RS_STATE_DIR` can override this directory. State is outside the checkout. The dedicated stack uses Basic licensing, keeps Elasticsearch data in a named Docker volume, and restarts its containers automatically. A user systemd service runs a separate copy of the release binary and restarts it after failure. Service installation uses the user's data directory rather than modifying a shared dotfiles checkout.
 
-Centralize URL encoding, base paths, headers, authentication, cancellation, and error preservation. Treat export as bytes or a stream. A raw request must support non-JSON bodies and responses and make global versus space routing explicit. Do not retry potentially mutating operations automatically after an ambiguous failure.
+For the user service to start before login and survive logout, enable lingering with `loginctl enable-linger "$(id -un)"`. This is enabled on homebox. Reboot recovery has not been tested.
 
-Use release-pinned OpenAPI files to inventory and review upstream changes. Evaluate generation for selected internal models later. Keep generated names and schema quirks out of the public Rust interface, and do not require downstream users to fetch specifications or run a generator during their build.
+Package installation requires access to Elastic's package registry. The browser assignment form uses a package's default inputs. Packages requiring additional variables must be configured through the library or Kibana. Installing a package can install its bundled dashboard assets, even though this client provides no dashboard authoring API.
 
-Generation is not proven yet. The main 9.5.4 specification contains 663 operations, schema composition, multipart uploads, several response formats, and incomplete dashboard entries. Specification reuse permissions also need resolution before distributing copied or generated material. [Measured findings and sources](research/api-feasibility.md).
+To stop the app, run `systemctl --user stop kibana-rs-demo`. To stop the dedicated containers without deleting data, use Docker Compose with `deploy/compose.yaml` and the generated `stack.env`. The scripts do not alter Tailscale policy or the existing T3 Serve configuration.
 
-## Compatibility and maintenance
+## Verification
 
-Begin with traditional Kibana 9.5, using 9.5.4 as the initial test target. Certify the chosen common operations on 9.4.7 next. Publish the exact versions tested and endpoint availability. Do not turn two successful test targets into a promise that every patch and minor works.
+Run local checks through the pinned Nix environment:
 
-For each upstream release, review specification and release-note differences, run the compatibility matrix, and update the support table. Adding a module also adds its integration tests and maintenance commitment. Experimental APIs should be explicitly opt-in; raw access is not a claim that an unsupported endpoint works.
+```sh
+nix develop -c cargo fmt --all -- --check
+nix develop -c cargo clippy --locked --all-features --all-targets -- -D warnings
+nix develop -c cargo test --locked --all-features --all-targets
+```
 
-The meaningful release checks would be:
+Live tests are explicitly ignored in an ordinary test run. They create temporary spaces, roles, policies, and rules and require a dedicated test deployment:
 
-- Create, read, update, and delete resources in an isolated space against real Elasticsearch and Kibana instances.
-- Export and reimport objects with references, conflicts, and partial failures.
-- Verify authentication and permissions with ordinary scoped credentials, not only an administrator.
-- Exercise reverse-proxy prefixes, global versus space routing, pagination, streaming, malformed/non-JSON errors, and ambiguous request failures.
-- Confirm forward-compatible response decoding and run the exact documented server versions before release.
+```sh
+KIBANA_URL=http://127.0.0.1:15601 \
+KIBANA_USERNAME=elastic KIBANA_PASSWORD=your-test-password \
+nix develop -c cargo test --test live -- --ignored --test-threads=1
+```
 
-These are proposed checks. None has been run for this repository because implementation has not started.
+Do not use live tests against a production deployment. Integration package assets are cluster-wide and remain installed after temporary policies and spaces are removed. A failed assertion may also leave a test resource for inspection.
 
-## Effort estimate
+Browser checks use the real workbench and create/delete their own test resources:
 
-These are planning estimates for one experienced Rust engineer working focused days. They are not measurements from a prototype, and AI assistance is not assumed to eliminate compatibility testing.
+```sh
+KIBANA_RS_DEMO_URL=http://homebox:8787 \
+CHROME_BIN=/path/to/chrome \
+KIBANA_RS_SCREENSHOTS=/tmp/kibana-rs-screenshots \
+nix develop -c uv run --with playwright python -u tests/browser.py
+```
 
-| Milestone | Estimate |
-| --- | --- |
-| Small working slice, transport plus a few real workflows | 3 to 5 engineer-days |
-| Useful first release with the selected operations, documentation, and a real compatibility matrix | 20 to 40 engineer-days total, about 4 to 8 focused weeks |
-| Broad coverage including several specialist modules | 3 to 6 months total, depending on typing depth and deployment variants |
-| Maintain the focused client after stabilization | Budget 1 to 3 days/month, plus 2 to 5 days for a supported minor-version transition |
+See [verification evidence](docs/verification.md) for the results and limits of the actual runs. The CI workflow runs compilation, formatting, linting, and transport tests; it does not claim live compatibility certification.
 
-The maintenance estimates assume a narrow, tested contract. More major versions, Serverless, preview APIs, and exhaustive visualization models can increase them substantially. Adding types is often cheap; reproducing permissions, subscription behavior, and version-specific failures is less predictable.
+## Compatibility limits
 
-## Next decision
+Only traditional Kibana 9.5.4 was exercised. Kibana 9.4, 8.x, Serverless, agent reassign/unenroll, and integration uninstallation have not been live-certified. EQL/threshold rule builders, exception-list helpers, response actions, generic alerting, connectors, data views, and saved-object transfer remain outside this first implementation. The raw request API is available for those cases.
 
-When implementation is authorized, start with a small slice: connect, create a space and data view, export/import a dashboard, and create a disabled rule with a connector. Use that to test the interface and the compatibility assumptions before expanding coverage. Success means those workflows run on the stated targets with useful failure reporting, and the schema adjustments remain small enough to maintain.
+The [API investigation](research/api-feasibility.md) and [existing-client survey](research/existing-clients.md) preserve the pre-implementation findings. This code is handwritten; no upstream OpenAPI bundle, server source, or generated binding was copied into the crate. The initial research's future scope is superseded by this security/Fleet-first release.
 
-Prefer contributing to `kibana-sync` if the actual need narrows to artifact transfer. For the broader typed automation client proposed here, a separate crate is reasonable. No maintainer contact, external repository creation, or package publication was performed.
+Code is available under MIT or Apache-2.0. Kibana and Elasticsearch are Elastic trademarks; this project is not affiliated with Elastic.
