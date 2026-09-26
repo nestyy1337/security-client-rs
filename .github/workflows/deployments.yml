@@ -20,6 +20,10 @@ jobs:
         profile: [9.5.4-basic, 9.4.7-basic]
     steps:
       - uses: actions/checkout@v4
+      - name: Make room for deployment images
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          df -h /
       - uses: dtolnay/rust-toolchain@stable
       - uses: astral-sh/setup-uv@v6
         with:

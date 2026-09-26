@@ -45,6 +45,8 @@ Results default to `$XDG_STATE_HOME/security-client-tests`, or `~/.local/state/s
 
 GitHub Actions runs both profiles on pushes to main, pull requests, manual dispatch and weekly. Each profile has an independent job; failures retain artifacts for 14 days. Fast transport tests, fixture-runner tests, formatting, linting and coverage checks run separately. A successful ordinary Cargo job alone is not deployment compatibility evidence.
 
+The disposable GitHub runner removes its unused Android and .NET SDKs before pulling images. Without that step, Agent image extraction pushed the runner below Elasticsearch's default high disk watermark and blocked allocation of Fleet's primary shard. Elasticsearch's disk protection stays enabled. On a local machine, leave enough free space after pulling images to remain below the default 85% low watermark.
+
 These workflows exercise selected contracts on clean self-managed deployments. They do not certify every upstream API field, paid features, Serverless, Cloud Hosted, 8.x, deployment upgrades, mixed-version agents, ARM, Elastic Defend or Fleet-managed binary upgrades. Container Agents cannot perform the latter; that needs a future VM fixture. A release must run the matrix against its exact packaged source and declared Rust minimum before claiming release certification.
 
 The [upstream research](../../research/reproducible-deployments.md#what-the-official-rust-client-actually-does) records which testing patterns came from `elastic/elasticsearch-rs` and why its old YAML generator was not copied.
