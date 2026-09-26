@@ -211,7 +211,7 @@ async fn search(index: &str, query: Value) -> u64 {
         status.is_success() || status == StatusCode::REQUEST_TIMEOUT,
         "Index health failed: {status} {health}"
     );
-    if health["timed_out"] == true {
+    if health["timed_out"] == true || health["active_primary_shards"].as_u64() == Some(0) {
         return 0;
     }
     assert!(matches!(
@@ -230,10 +230,46 @@ async fn search(index: &str, query: Value) -> u64 {
         .unwrap();
     let status = response.status();
     let response = response.json::<Value>().await.unwrap();
+    if missing_search_shards(status, &response) {
+        return 0;
+    }
     assert!(status.is_success(), "Search failed: {status} {response}");
     assert_eq!(response["_shards"]["failed"], 0);
     assert_eq!(response["timed_out"], false);
     response["hits"]["total"]["value"].as_u64().unwrap()
+}
+
+fn missing_search_shards(status: StatusCode, response: &Value) -> bool {
+    status == StatusCode::SERVICE_UNAVAILABLE
+        && response["error"]["type"] == "search_phase_execution_exception"
+        && response["error"]["caused_by"]["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.starts_with("Search rejected due to missing shards ["))
+}
+
+#[test]
+fn only_missing_shards_are_pending_search_results() {
+    let missing = json!({"error": {
+        "type": "search_phase_execution_exception",
+        "caused_by": {"reason": "Search rejected due to missing shards [[fixture][0]]."}
+    }});
+    assert!(missing_search_shards(
+        StatusCode::SERVICE_UNAVAILABLE,
+        &missing
+    ));
+    assert!(!missing_search_shards(StatusCode::UNAUTHORIZED, &missing));
+    assert!(!missing_search_shards(StatusCode::OK, &missing));
+    for response in [
+        json!({"error": {"type": "search_phase_execution_exception", "caused_by": {"reason": "invalid query"}}}),
+        json!({"error": {"type": "circuit_breaking_exception"}}),
+        json!({"error": {"type": "security_exception"}}),
+        json!({"hits": {"total": {"value": 0}}}),
+    ] {
+        assert!(!missing_search_shards(
+            StatusCode::SERVICE_UNAVAILABLE,
+            &response
+        ));
+    }
 }
 
 async fn wait_for_policy(client: &Client, agent_id: &str, policy: &str, revision: u64) {

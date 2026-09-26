@@ -186,7 +186,7 @@ class Deployment:
             if artifact.get("reason") == "compiler-artifact" and artifact.get("executable"):
                 binaries[artifact["target"]["name"]] = artifact["executable"]
         for binary, expected in SCENARIOS.items():
-            listing = self.command([binaries[binary], "--list"]).stdout
+            listing = self.command([binaries[binary], "--ignored", "--list"]).stdout
             actual = set(re.findall(r"^(.+): test$", listing, flags=re.M))
             if actual != set(expected):
                 raise RuntimeError(f"Integration test inventory differs for {binary}: {actual ^ set(expected)}")
