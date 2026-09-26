@@ -71,6 +71,17 @@ class RunnerTests(unittest.TestCase):
         for value in [secret, "abc=", "generated-by-agent"]:
             self.assertNotIn(value, redacted)
 
+    def test_public_status_does_not_prove_authenticated_readiness(self):
+        self.deployment.api = Mock(return_value={"status": {"overall": {"level": "available"}}})
+        with self.assertRaisesRegex(RuntimeError, "not fully authenticated"):
+            self.deployment.ready_kibana()
+        full = {"status": {"overall": {"level": "available"}}, "version": {"number": "9.5.4"}}
+        self.deployment.api = Mock(side_effect=[full, RuntimeError("HTTP 503: licensing unavailable")])
+        with self.assertRaisesRegex(RuntimeError, "licensing unavailable"):
+            self.deployment.ready_kibana()
+        self.deployment.api = Mock(side_effect=[full, [{"id": "default"}]])
+        self.assertTrue(self.deployment.ready_kibana())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -196,21 +196,43 @@ async fn search(index: &str, query: Value) -> u64 {
         .timeout(Duration::from_secs(30))
         .build()
         .unwrap();
+    let health = http
+        .get(format!(
+            "{}/_cluster/health/{index}?wait_for_status=yellow&timeout=1s",
+            env("ELASTICSEARCH_URL")
+        ))
+        .basic_auth("elastic", Some(env("KIBANA_PASSWORD")))
+        .send()
+        .await
+        .unwrap();
+    let status = health.status();
+    let health = health.json::<Value>().await.unwrap();
+    assert!(
+        status.is_success() || status == StatusCode::REQUEST_TIMEOUT,
+        "Index health failed: {status} {health}"
+    );
+    if health["timed_out"] == true {
+        return 0;
+    }
+    assert!(matches!(
+        health["status"].as_str(),
+        Some("yellow" | "green")
+    ));
     let response = http
         .post(format!(
-            "{}/{index}/_search?ignore_unavailable=true",
+            "{}/{index}/_search?allow_partial_search_results=false",
             env("ELASTICSEARCH_URL")
         ))
         .basic_auth("elastic", Some(env("KIBANA_PASSWORD")))
         .json(&json!({"query": query, "size": 0, "track_total_hits": true}))
         .send()
         .await
-        .unwrap()
-        .error_for_status()
-        .unwrap()
-        .json::<Value>()
-        .await
         .unwrap();
+    let status = response.status();
+    let response = response.json::<Value>().await.unwrap();
+    assert!(status.is_success(), "Search failed: {status} {response}");
+    assert_eq!(response["_shards"]["failed"], 0);
+    assert_eq!(response["timed_out"], false);
     response["hits"]["total"]["value"].as_u64().unwrap()
 }
 

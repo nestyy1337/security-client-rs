@@ -144,6 +144,17 @@ class Deployment:
         address = self.compose("port", service, str(port)).stdout.strip()
         return address.rsplit(":", 1)[1]
 
+    def ready_kibana(self):
+        status = self.api("kibana", "/api/status")
+        version = status.get("version", {}).get("number")
+        level = status.get("status", {}).get("overall", {}).get("level")
+        if version and version != self.profile["version"]:
+            raise RuntimeError(f"Kibana version {version} differs from profile")
+        if not version or level != "available":
+            raise RuntimeError(f"Kibana not fully authenticated and available: version={version}, level={level}")
+        self.api("kibana", "/api/spaces/space")
+        return True
+
     def certificates(self):
         directory = self.directory / "certs"
         directory.mkdir(mode=0o755)
@@ -230,9 +241,7 @@ class Deployment:
         self.api("es", "/_security/user/kibana_system/_password", "POST", {"password": self.kibana_password})
         self.compose("up", "-d", "kibana", timeout=900)
         self.urls["kibana"] = "https://127.0.0.1:" + self.port("gateway", 5601)
-        self.wait("Kibana migrations and plugins", lambda: self.api("kibana", "/api/status")["status"]["overall"]["level"] == "available", timeout=360)
-        if self.api("kibana", "/api/status")["version"]["number"] != self.profile["version"]:
-            raise RuntimeError("Kibana version differs from profile")
+        self.wait("Kibana migrations, plugins and authenticated API", self.ready_kibana, timeout=360)
         self.environment.update({
             "KIBANA_URL": self.urls["kibana"], "KIBANA_USERNAME": "elastic", "KIBANA_PASSWORD": self.password,
             "KIBANA_CA_CERT": str(self.directory / "certs/ca.crt"), "ELASTICSEARCH_URL": self.urls["es"],
