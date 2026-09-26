@@ -80,6 +80,146 @@
     "notes": "JSON status response; completeness not audited."
   },
   {
+    "wrapper": "exceptions.create_item",
+    "method": "POST",
+    "path": "/api/exception_lists/items",
+    "operation_id": "CreateExceptionListItem",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Typed match, match_any, exists, wildcard, value-list reference and nested entries, plus OS types; Endpoint artifact validation deferred."
+  },
+  {
+    "wrapper": "exceptions.create_list",
+    "method": "POST",
+    "path": "/api/exception_lists",
+    "operation_id": "CreateExceptionList",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Detection list fields, OS types and user-defined version; Endpoint artifact constraints not validated by the client."
+  },
+  {
+    "wrapper": "exceptions.delete_item",
+    "method": "DELETE",
+    "path": "/api/exception_lists/items",
+    "operation_id": "DeleteExceptionListItem",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Core fields and extensible response; full contract parity not audited."
+  },
+  {
+    "wrapper": "exceptions.delete_list",
+    "method": "DELETE",
+    "path": "/api/exception_lists",
+    "operation_id": "DeleteExceptionList",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Core fields and extensible response; full contract parity not audited."
+  },
+  {
+    "wrapper": "exceptions.duplicate_list",
+    "method": "POST",
+    "path": "/api/exception_lists/_duplicate",
+    "operation_id": "DuplicateExceptionList",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "List ID, namespace and expired-item selection; response retains extra fields."
+  },
+  {
+    "wrapper": "exceptions.export_list",
+    "method": "POST",
+    "path": "/api/exception_lists/_export",
+    "operation_id": "ExportExceptionList",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Streaming NDJSON with namespace and expired-item selection. Value-list contents excluded."
+  },
+  {
+    "wrapper": "exceptions.import_lists",
+    "method": "POST",
+    "path": "/api/exception_lists/_import",
+    "operation_id": "ImportExceptionList",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Multipart NDJSON with overwrite/as_new_list options; preserves HTTP-200 partial failures. Value-list contents excluded."
+  },
+  {
+    "wrapper": "exceptions.item",
+    "method": "GET",
+    "path": "/api/exception_lists/items",
+    "operation_id": "ReadExceptionListItem",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Core fields and extensible response; full contract parity not audited."
+  },
+  {
+    "wrapper": "exceptions.items",
+    "method": "GET",
+    "path": "/api/exception_lists/items/_find",
+    "operation_id": "FindExceptionListItems",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "One list and namespace per call; pagination/filter/sorting, no multi-list or search option. Upstream scalar parsing does not support literal commas in list IDs/filters."
+  },
+  {
+    "wrapper": "exceptions.list",
+    "method": "GET",
+    "path": "/api/exception_lists",
+    "operation_id": "ReadExceptionList",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Core fields and extensible response; full contract parity not audited."
+  },
+  {
+    "wrapper": "exceptions.lists",
+    "method": "GET",
+    "path": "/api/exception_lists/_find",
+    "operation_id": "FindExceptionLists",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "One namespace per call; explicit pagination, filter and sorting."
+  },
+  {
+    "wrapper": "exceptions.summary",
+    "method": "GET",
+    "path": "/api/exception_lists/summary",
+    "operation_id": "ReadExceptionListSummary",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "JSON OS summary; optional filter not exposed. Upstream can report total=0 when no items have os_types; use items().total for item counts."
+  },
+  {
+    "wrapper": "exceptions.update_item",
+    "method": "PUT",
+    "path": "/api/exception_lists/items",
+    "operation_id": "UpdateExceptionListItem",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Explicit optimistic concurrency token; replaces modeled fields. Endpoint artifact validation deferred."
+  },
+  {
+    "wrapper": "exceptions.update_list",
+    "method": "PUT",
+    "path": "/api/exception_lists",
+    "operation_id": "UpdateExceptionList",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Explicit optimistic concurrency token; replaces modeled fields, not a patch."
+  },
+  {
     "wrapper": "fleet.agent",
     "method": "GET",
     "path": "/api/fleet/agents/{agentId}",
@@ -87,7 +227,17 @@
     "scope": "Space",
     "contract": "unreviewed",
     "evidence": null,
-    "notes": "Core fields plus extensible JSON; no enrolled-agent test."
+    "notes": "Core fields plus extensible JSON; real-agent state and policy acknowledgment are exercised by deployment tests."
+  },
+  {
+    "wrapper": "fleet.agent_actions",
+    "method": "GET",
+    "path": "/api/fleet/agents/action_status",
+    "operation_id": "get-fleet-agents-action-status",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. No automatic polling."
   },
   {
     "wrapper": "fleet.agent_policies",
@@ -117,7 +267,17 @@
     "scope": "Space",
     "contract": "unreviewed",
     "evidence": "live-fleet",
-    "notes": "JSON status summary; exercised with an empty fleet."
+    "notes": "JSON status summary; historical operation-level evidence used an empty fleet."
+  },
+  {
+    "wrapper": "fleet.agent_uploads",
+    "method": "GET",
+    "path": "/api/fleet/agents/{agentId}/uploads",
+    "operation_id": "get-fleet-agents-agentid-uploads",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Typed status, action ID and file metadata; caller correlates readiness before download."
   },
   {
     "wrapper": "fleet.agents",
@@ -127,7 +287,67 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-fleet",
-    "notes": "Page, page size and kuery only; exercised with an empty fleet."
+    "notes": "Page, page size and kuery only; historical operation-level evidence used an empty fleet."
+  },
+  {
+    "wrapper": "fleet.bulk_reassign_agents",
+    "method": "POST",
+    "path": "/api/fleet/agents/bulk_reassign",
+    "operation_id": "post-fleet-agents-bulk-reassign",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Core fields and extensible response; full contract parity not audited."
+  },
+  {
+    "wrapper": "fleet.bulk_request_agent_diagnostics",
+    "method": "POST",
+    "path": "/api/fleet/agents/bulk_request_diagnostics",
+    "operation_id": "post-fleet-agents-bulk-request-diagnostics",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "ID/KQL selection, dryRun, batchSize and CPU metric; no includeInactive contract."
+  },
+  {
+    "wrapper": "fleet.bulk_unenroll_agents",
+    "method": "POST",
+    "path": "/api/fleet/agents/bulk_unenroll",
+    "operation_id": "post-fleet-agents-bulk-unenroll",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Core fields and extensible response; full contract parity not audited."
+  },
+  {
+    "wrapper": "fleet.bulk_update_agent_tags",
+    "method": "POST",
+    "path": "/api/fleet/agents/bulk_update_agent_tags",
+    "operation_id": "post-fleet-agents-bulk-update-agent-tags",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Core fields and extensible response; full contract parity not audited."
+  },
+  {
+    "wrapper": "fleet.bulk_upgrade_agents",
+    "method": "POST",
+    "path": "/api/fleet/agents/bulk_upgrade",
+    "operation_id": "post-fleet-agents-bulk-upgrade",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Typed selection, dry-run and rollout options; acceptance/count distinguished. No successful binary-upgrade fixture."
+  },
+  {
+    "wrapper": "fleet.cancel_agent_action",
+    "method": "POST",
+    "path": "/api/fleet/agents/actions/{actionId}/cancel",
+    "operation_id": "post-fleet-agents-actions-actionid-cancel",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "JSON runtime response; cancellation supported for upgrade/unenroll only. Wire-tested, no successful cancellation fixture."
   },
   {
     "wrapper": "fleet.copy_agent_policy",
@@ -148,6 +368,16 @@
     "contract": "partial",
     "evidence": "live-fleet",
     "notes": "Name, namespace, description, monitoring, output and inactivity options only."
+  },
+  {
+    "wrapper": "fleet.create_enrollment_key",
+    "method": "POST",
+    "path": "/api/fleet/enrollment_api_keys",
+    "operation_id": "post-fleet-enrollment-api-keys",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Policy, name and expiration; credential redacted in Debug. Selected response fields only."
   },
   {
     "wrapper": "fleet.create_package_policy",
@@ -180,6 +410,16 @@
     "notes": "Single package-policy deletion, JSON result."
   },
   {
+    "wrapper": "fleet.download_agent_file",
+    "method": "GET",
+    "path": "/api/fleet/agents/files/{fileId}/{fileName}",
+    "operation_id": "get-fleet-agents-files-fileid-filename",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Checked streaming binary response, despite the upstream JSON success schema."
+  },
+  {
     "wrapper": "fleet.download_agent_policy",
     "method": "GET",
     "path": "/api/fleet/agent_policies/{agentPolicyId}/download",
@@ -188,6 +428,26 @@
     "contract": "unreviewed",
     "evidence": "live-fleet",
     "notes": "Streaming policy response; alternate download options not audited."
+  },
+  {
+    "wrapper": "fleet.enrollment_key",
+    "method": "GET",
+    "path": "/api/fleet/enrollment_api_keys/{keyId}",
+    "operation_id": "get-fleet-enrollment-api-keys-keyid",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Runtime item envelope; credential is redacted in Debug. Selected fields only."
+  },
+  {
+    "wrapper": "fleet.enrollment_keys",
+    "method": "GET",
+    "path": "/api/fleet/enrollment_api_keys",
+    "operation_id": "get-fleet-enrollment-api-keys",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Explicit pagination and KQL; deprecated duplicate list field omitted. Credentials redacted in Debug."
   },
   {
     "wrapper": "fleet.install_integration",
@@ -257,7 +517,27 @@
     "scope": "Space",
     "contract": "unreviewed",
     "evidence": null,
-    "notes": "Policy-ID reassignment request; no agent acknowledgment test."
+    "notes": "Policy-ID reassignment request; deployment tests verify the agent's policy and revision acknowledgment."
+  },
+  {
+    "wrapper": "fleet.request_agent_diagnostics",
+    "method": "POST",
+    "path": "/api/fleet/agents/{agentId}/request_diagnostics",
+    "operation_id": "post-fleet-agents-agentid-request-diagnostics",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Optional CPU metrics; asynchronous action result, follow upload readiness before download."
+  },
+  {
+    "wrapper": "fleet.revoke_enrollment_key",
+    "method": "DELETE",
+    "path": "/api/fleet/enrollment_api_keys/{keyId}",
+    "operation_id": "delete-fleet-enrollment-api-keys-keyid",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Default revocation only; 9.5-only forceDelete/includeHidden options omitted for 9.4 compatibility."
   },
   {
     "wrapper": "fleet.setup",
@@ -277,7 +557,7 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": null,
-    "notes": "Default unenrollment options only; no enrolled-agent test."
+    "notes": "Default unenrollment options only; the deployment suite currently exercises bulk unenrollment."
   },
   {
     "wrapper": "fleet.uninstall_integration",
@@ -287,7 +567,7 @@
     "scope": "Space",
     "contract": "unreviewed",
     "evidence": null,
-    "notes": "Default removal request; no recorded live removal test."
+    "notes": "Default removal request; deployment tests remove the owned integration after unenrollment."
   },
   {
     "wrapper": "fleet.update_agent_policy",
@@ -308,6 +588,16 @@
     "contract": "partial",
     "evidence": "live-fleet",
     "notes": "Simplified input format and selected fields only."
+  },
+  {
+    "wrapper": "fleet.upgrade_agent",
+    "method": "POST",
+    "path": "/api/fleet/agents/{agentId}/upgrade",
+    "operation_id": "post-fleet-agents-agentid-upgrade",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Typed request; JSON acknowledgment only. Successful binary upgrades require a service-installed Agent; container rejection is not upgrade certification."
   },
   {
     "wrapper": "roles.delete",
@@ -357,7 +647,7 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-rules",
-    "notes": "KQL/Lucene query rules only; other rule types and advanced settings lack creation types."
+    "notes": "KQL/Lucene query rules and exception-list associations; other rule types and advanced settings lack creation types."
   },
   {
     "wrapper": "security.delete_rule",
@@ -437,7 +727,7 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-rules",
-    "notes": "Name, description, enabled, query, severity, risk score and tags only."
+    "notes": "Common fields plus replacement of exception-list associations; other advanced fields not modeled."
   },
   {
     "wrapper": "spaces.create",

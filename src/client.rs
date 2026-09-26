@@ -10,7 +10,8 @@ use serde::{Serialize, de::DeserializeOwned};
 use url::Url;
 
 use crate::{
-    Error, Result, cases::Cases, fleet::Fleet, roles::Roles, security::Security, spaces::Spaces,
+    Error, Result, cases::Cases, exceptions::Exceptions, fleet::Fleet, roles::Roles,
+    security::Security, spaces::Spaces,
 };
 
 const ERROR_LIMIT: usize = 16 * 1024;
@@ -198,6 +199,9 @@ impl Client {
     }
     pub fn fleet(&self) -> Fleet<'_> {
         Fleet(self)
+    }
+    pub fn exceptions(&self) -> Exceptions<'_> {
+        Exceptions(self)
     }
     pub fn cases(&self) -> Cases<'_> {
         Cases(self)

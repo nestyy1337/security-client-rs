@@ -8,6 +8,7 @@
 pub mod cases;
 mod client;
 mod error;
+pub mod exceptions;
 pub mod fleet;
 pub mod roles;
 pub mod security;

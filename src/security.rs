@@ -52,6 +52,8 @@ pub struct QueryRule {
     pub tags: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rule_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub exceptions_list: Vec<crate::exceptions::ListReference>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -81,12 +83,16 @@ impl QueryRule {
             from: "now-6m".into(),
             tags: vec![],
             rule_id: None,
+            exceptions_list: vec![],
         }
     }
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct RulePatch {
+    /// Replaces all list associations. Use an empty vector to detach every list.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exceptions_list: Option<Vec<crate::exceptions::ListReference>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

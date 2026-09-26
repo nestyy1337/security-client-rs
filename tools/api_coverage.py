@@ -80,6 +80,7 @@ def group(operation):
     path = operation["path"]
     for prefix, name in [
         ("/api/detection_engine", "Detection engine"),
+        ("/api/exception_lists", "Exceptions"),
         ("/api/fleet", "Fleet"),
         ("/api/cases", "Cases"),
         ("/api/spaces", "Spaces"),
@@ -138,7 +139,7 @@ def report(root, metadata, operations, rows):
         f"| Area | Published operations | Named wrappers | Recorded exercised on {evidence['kibana_version']} | Missing wrappers |",
         "| --- | ---: | ---: | ---: | ---: |",
     ]
-    for name in ["Detection engine", "Cases", "Fleet", "Spaces", "Roles", "Status", "Other APIs"]:
+    for name in ["Detection engine", "Exceptions", "Cases", "Fleet", "Spaces", "Roles", "Status", "Other APIs"]:
         lines.append(f"| {name} | {totals[name]} | {implemented[name]} | {recorded[name]} | {totals[name] - implemented[name]} |")
     lines += [
         f"| **Total** | **{len(operations)}** | **{len(rows)}** | **{sum(recorded.values())}** | **{len(operations) - len(rows)}** |", "",
@@ -147,14 +148,14 @@ def report(root, metadata, operations, rows):
         "- `partial` means a known request or response limitation. `unreviewed` means full contract parity has not been audited. Neither means complete support.",
         f"- The denominator includes {sum(bool(op.get('deprecated')) for op in operations.values())} deprecated operations, documentation placeholders, and {sum('/internal/' in op['path'] for op in operations.values())} explicit internal route. It is the published bundle inventory, not a list of guaranteed stable public contracts.",
         "- Parameter names are normalized for matching. Explicit `/s/{spaceId}` paths remain distinct. Space-routing behavior must be tested separately.",
-        "- Detection engine means `/api/detection_engine`; Cases, Fleet and Spaces use their corresponding prefixes. Roles includes `/api/security/role`, its children and `/api/security/roles`. Other APIs includes unimplemented security areas as well as dashboards and unrelated areas.", "",
+        "- Detection engine means `/api/detection_engine`; Exceptions means `/api/exception_lists`. Cases, Fleet and Spaces use their corresponding prefixes. Roles includes `/api/security/role`, its children and `/api/security/roles`. Other APIs includes unimplemented security areas as well as dashboards and unrelated areas.", "",
         "## Evidence and compatibility", "",
         f"The {sum(recorded.values())} recorded exercises refer to the {evidence['date']} local run on traditional Kibana {evidence['kibana_version']} with Basic licensing, at source commit `{evidence['source_commit']}`. They are curated from [the verification record](verification.md), not a machine-attested certification run.", "",
         f"Evidence fingerprint: **{'matches current client and test inputs' if current else 'STALE: client or test inputs changed; historical evidence only'}**.", "",
-        f"The recorded live test functions exercise {sum(bool(r['evidence'] and r['evidence'].startswith('live-')) for r in rows)} named operations. Browser checks exercise status as well. A successful CRUD scenario does not verify all parameters, response variants, privileges or eventual effects. Agent listing was tested only with no enrolled agents.", "",
-        "**Release-certified deployment profiles: none.** Other Kibana releases, Serverless, enrolled-agent behavior, and package uninstallation remain unverified. No compatibility badge should be inferred from this report.", "",
+        "The historical run exercised 44 operations through live tests and status through the browser. It used an empty fleet. The newer [deployment suite](../tests/deployment/README.md) verifies real agents and additional workflows on exact 9.5.4 and 9.4.7 profiles. Its CI results are separate from the historical evidence column below. A successful scenario does not verify every parameter, response variant or permission combination.", "",
+        "**Release-certified deployment profiles: none.** Passing deployment scenarios do not certify full API contracts or packaged-release/MSRV compatibility. Successful Fleet binary upgrades and cancellation require a future service-installed Agent fixture. No such success is inferred from dry runs, container rejection or wire tests.", "",
         "## Named operation inventory", "",
-        "`live-*` and `browser` below refer to the recorded workflows, not new runs. A dash means no recorded live evidence. All rows have a wrapper; the contract column records the separate completeness assessment.", "",
+        "`live-*` and `browser` below refer to the historical workflows, not current CI runs. A dash means no evidence in that historical record. Current deployment scenarios are documented separately above. All rows have a wrapper; the contract column records the separate completeness assessment.", "",
         "| Rust operation | Official operation ID | HTTP route | Contract | Evidence | Limits |",
         "| --- | --- | --- | --- | --- | --- |",
     ]

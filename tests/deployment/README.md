@@ -11,7 +11,7 @@ The initial profiles require Linux x86_64, Docker with Compose v2, at least 8 Gi
 
 No existing Kibana deployment or credentials are required. Each run owns a random Compose project, temporary credentials and CA, and new Elasticsearch/Agent volumes. The runner deletes its containers, networks, volumes and credentials after success, test failure or SIGINT/SIGTERM. It verifies that the project's resources are gone. SIGKILL, a host crash or a dead Docker daemon can prevent cleanup; the report includes the exact project name for recovery. It never runs a global Docker prune.
 
-Ordinary `cargo test` ignores the seven real-deployment scenarios. This runner verifies the complete test inventory, invokes each named scenario and checks that one test actually passed. Missing environment, zero tests, ignored tests, setup failure and cleanup failure cannot produce a passing deployment result.
+Ordinary `cargo test` ignores the ten real-deployment scenarios. This runner verifies the complete test inventory, invokes each named scenario and checks that one test actually passed. Missing environment, zero tests, ignored tests, setup failure and cleanup failure cannot produce a passing deployment result.
 
 ## What runs
 
@@ -21,9 +21,14 @@ Ordinary `cargo test` ignores the seven real-deployment scenarios. This runner v
 | Cases | CRUD, comments, version conflicts |
 | Fleet configuration | Agent policy CRUD/copy/download, integration catalogue/details/install, package policy CRUD, outputs and agent status |
 | Roles and spaces | Global role administration, space privilege round trip, space CRUD |
-| TLS and permissions | Untrusted CA rejected, trusted CA accepted, Basic and API-key identities, bad credentials rejected, read-only mutations denied, cross-space and role administration denied |
+| Exceptions | List/item CRUD, optimistic concurrency conflicts, space isolation and agnostic sharing, pagination, duplicate/import/export, partial import errors and rule associations |
+| Enrollment keys | Create with expiry, get/list/paginate, revoke and verify inactive state |
+| Agent operations | Bulk tag changes, dry-run counts, reassignment acknowledgment, mixed success/failure across two real agents, diagnostics download, container upgrade rejection |
+| TLS and permissions | Untrusted CA rejected, trusted CA accepted, Basic and API-key identities, bad credentials rejected, read-only rule/exception/Fleet mutations denied, cross-space and role administration denied |
 | Pagination | Three owned rules retrieved across two pages without loss or duplicates |
-| Managed Agent | Enrollment and identity preserved across restart, integration policy acknowledgment, synthetic log ingestion, query rule produces an alert, policy revision acknowledgment, reassignment, unenrollment, package uninstall |
+| Managed Agent | Enrollment and identity preserved across restart, integration policy acknowledgment, synthetic log ingestion, exception suppresses an alert after successful rule execution, detaching it permits detection, policy revision acknowledgment, reassignment, bulk unenrollment, package uninstall |
+
+Upgrade scheduling/cancellation wire tests cover request encoding and runtime response envelopes. The deployment profile verifies container upgrade rejection, not successful upgrades or cancellation. Bulk diagnostics currently has a real dry-run check; single-agent diagnostics verifies the full download workflow.
 
 Bootstrap uses direct documented APIs. Assertions exercise the public Rust crate; Elasticsearch searches independently verify ingestion and alert creation. Agent readiness checks require the expected policy ID, exact revision and online status. Polling has deadlines and does not retry uncertain writes.
 

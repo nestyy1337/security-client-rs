@@ -27,7 +27,7 @@ nix develop -c uv run tools/api_coverage.py --fetch
 
 CI rejects stale reports, mismatched upstream hashes, missing or duplicate manifest entries, changed route mappings, and missing evidence-test references. The parser deliberately supports the crate's current direct request convention. A new helper or dynamic route shape requires extending the checker explicitly; it must not silently disappear from the count. This is a source inventory check, not a Rust semantic analyzer or a wire-contract test.
 
-The historical evidence stores its original source commit and a fingerprint of the client, dependency lock and test inputs. If those inputs change, the report labels that evidence stale. Do not update that fingerprint to turn the label green without a corresponding run. The record remains curated until the proposed deployment suite emits machine-readable results.
+The historical evidence stores its original source commit and a fingerprint of the client, dependency lock and test inputs. If those inputs change, the report labels that evidence stale. Do not update that fingerprint to turn the label green without a corresponding run. The record remains historical. Current deployment runs emit separate machine-readable reports tied to the source revision and fixture hashes.
 
 ## Upstream changes
 
@@ -41,12 +41,12 @@ Avoid a single "API parity" badge. Show named endpoint breadth, known contract g
 
 The security-first backlog should prioritize closing existing behavioral gaps before adding more wrappers:
 
-- Real agent get/reassign/unenroll and package removal, which currently lack live evidence.
+- Keep real agent, exception suppression and package-removal assertions in the deployment matrix. Historical manifest evidence remains separate from current CI artifacts.
 - Authentication, TLS, non-default spaces, permission denials and pagination beyond one page on every claimed deployment.
 - Field/variant audits for existing rule, case, policy and role methods. Query-rule creation does not represent EQL, threshold, indicator-match, machine-learning or other rule types.
-- Exception lists and value lists; prebuilt rule install/update and bulk rule operations; agent enrollment prerequisites, policy outputs and Fleet Server configuration.
+- Value-list storage management; prebuilt rule install/update and bulk rule operations; policy outputs and Fleet Server configuration. Exception-list management and enrollment keys now have named wrappers and deployment scenarios.
 - Endpoint response actions and Osquery only with appropriate endpoint fixtures and license profiles.
 
 Dashboard authoring stays deferred. The full bundle count is context, not a target to implement every endpoint.
 
-The [deployment proposal](../research/reproducible-deployments.md) defines the next implementation stages. No new deployment suite or additional version certification was created as part of this tracker.
+The [deployment proposal](../research/reproducible-deployments.md) defines the next implementation stages. The implemented deployment suite runs selected scenarios on two exact profiles; successful binary upgrades, cancellation and release certification remain deferred.
