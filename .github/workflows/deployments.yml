@@ -1,0 +1,41 @@
+name: Deployment compatibility
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  deployment:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [9.5.4-basic, 9.4.7-basic]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Make room for deployment images
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          df -h /
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: '3.13'
+      - uses: Swatinem/rust-cache@v2
+      - name: Test deployment
+        run: uv run python -u tests/deployment/run.py --profile '${{ matrix.profile }}' --artifacts '${{ runner.temp }}/deployment-results'
+      - name: Retain results, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: deployment-${{ matrix.profile }}
+          path: ${{ runner.temp }}/deployment-results
+          if-no-files-found: error
+          retention-days: 14

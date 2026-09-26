@@ -2,17 +2,17 @@
 
 An async Rust client for Kibana security operations and Fleet management. The optional browser workbench demonstrates the crate against a real Kibana instance.
 
-The initial implementation targets traditional Kibana **9.5.4**. It is an independent project, not an Elastic-supported client. It has not been published to crates.io.
+The initial implementation targets traditional Kibana 9.x. It is an independent project, not an Elastic-supported client. It has not been published to crates.io.
 
 ## API coverage and compatibility
 
 <!-- BEGIN API COVERAGE -->
-Against the pinned traditional **9.5.4** bundle: **49/663 named operations** (7.4% endpoint breadth), **45 recorded exercises** on 9.5.4, and **no release-certified deployment profiles**. Recorded evidence matches the current client/test inputs. Full contract parity remains unaudited.
+Against the pinned traditional **9.5.4** bundle: **49/663 named operations** (7.4% endpoint breadth), **45 recorded exercises** on 9.5.4, and **no release-certified deployment profiles**. Recorded evidence is STALE for the current client/test inputs. Full contract parity remains unaudited.
 <!-- END API COVERAGE -->
 
 The [operation report](docs/api-coverage.md) lists every wrapper's official operation ID, contract limitations and recorded test evidence. The [coverage tracker](coverage/README.md) checks the report against a checksum-pinned upstream API bundle and the Rust source. CI does not equate a wrapper with complete parameter or response support.
 
-The next release milestone is a [reproducible deployment suite](research/reproducible-deployments.md), with locked stack and package versions, disposable data, and an enrolled Agent. That suite is proposed, not yet implemented. The demo's browser checks are separate from crate compatibility certification.
+The [deployment suite](tests/deployment/README.md) runs seven required scenarios against disposable **9.5.4** and **9.4.7** profiles, including a real Fleet Server and managed Agent. Images and signed packages are checksum-locked. GitHub Actions retains per-profile results and logs. These selected workflows are separate from full API contract parity and packaged-release certification. The older operation-level evidence above remains a historical record.
 
 ## Try the running workbench
 
@@ -115,15 +115,14 @@ nix develop -c cargo clippy --locked --all-features --all-targets -- -D warnings
 nix develop -c cargo test --locked --all-features --all-targets
 ```
 
-Live tests are explicitly ignored in an ordinary test run. They create temporary spaces, roles, policies, and rules and require a dedicated test deployment:
+Run the full deployment suite, including provisioning, seeding, assertions and cleanup:
 
 ```sh
-KIBANA_URL=http://127.0.0.1:15601 \
-KIBANA_USERNAME=elastic KIBANA_PASSWORD=your-test-password \
-nix develop -c cargo test --test live -- --ignored --test-threads=1
+nix develop -c uv run python -u tests/deployment/run.py --profile 9.5.4-basic
+nix develop -c uv run python -u tests/deployment/run.py --profile 9.4.7-basic
 ```
 
-Do not use live tests against a production deployment. Integration packages can install deployment-wide Elasticsearch assets, while Kibana assets can belong to spaces. Package installations and Elasticsearch assets remain after temporary policies and spaces are removed. A failed assertion may also leave a test resource for inspection.
+The runner requires Docker on Linux x86_64 and creates its own deployment. It verifies TLS, Basic/API-key permissions, security/case/Fleet lifecycles, pagination, real policy delivery, log ingestion and detection alerts. Every named test must run; ignored or zero-test results fail. Fresh volumes isolate each run. See the [suite documentation](tests/deployment/README.md) for requirements, profiles and artifact locations. Ordinary Cargo tests intentionally ignore these deployment scenarios.
 
 Browser checks use the real workbench and create/delete their own test resources:
 
@@ -134,11 +133,11 @@ KIBANA_RS_SCREENSHOTS=/tmp/kibana-rs-screenshots \
 nix develop -c uv run --with playwright python -u tests/browser.py
 ```
 
-See [verification evidence](docs/verification.md) for the results and limits of the actual runs. The CI workflow runs compilation, formatting, linting, and transport tests; it does not claim live compatibility certification.
+The [Check workflow](.github/workflows/check.yml) runs formatting, linting, transport and runner tests, and API coverage checks. The [deployment workflow](.github/workflows/deployments.yml) runs both deployment profiles on main pushes, pull requests, manual dispatch and weekly. See [verification evidence](docs/verification.md) for historical demo results; browser checks do not replace crate deployment tests.
 
 ## Compatibility limits
 
-Only traditional Kibana 9.5.4 was exercised. Kibana 9.4, 8.x, Serverless, agent reassign/unenroll, and integration uninstallation have not been live-certified. EQL/threshold rule builders, exception-list helpers, response actions, generic alerting, connectors, data views, and saved-object transfer remain outside this first implementation. The raw request API is available for those cases.
+The initial deployment matrix covers selected workflows on fresh self-managed 9.5.4 and 9.4.7 installations with Basic licensing. It does not cover 8.x, Serverless, Cloud Hosted, deployment upgrades, paid features, mixed-version agents, ARM or Fleet-managed binary upgrades. A release still needs verification against its packaged source and minimum Rust version. EQL/threshold rule builders, exception-list helpers, response actions, generic alerting, connectors, data views, and saved-object transfer remain outside this first implementation. The raw request API is available for those cases.
 
 The [API investigation](research/api-feasibility.md) and [existing-client survey](research/existing-clients.md) preserve the pre-implementation findings. This code is handwritten; no upstream OpenAPI bundle, server source, or generated binding was copied into the crate. The initial research's future scope is superseded by this security/Fleet-first release.
 

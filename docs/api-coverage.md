@@ -30,7 +30,7 @@ SHA-256: `a5dd0f2a0fa30f2bdcba6b42c712b9bfcd89f22aef29c9bf5285328f014279d9`.
 
 The 45 recorded exercises refer to the 2026-09-26 local run on traditional Kibana 9.5.4 with Basic licensing, at source commit `c5a8c31e66c11c4186fb92d05385813eddc40a6a`. They are curated from [the verification record](verification.md), not a machine-attested certification run.
 
-Evidence fingerprint: **matches current client and test inputs**.
+Evidence fingerprint: **STALE: client or test inputs changed; historical evidence only**.
 
 The recorded live test functions exercise 44 named operations. Browser checks exercise status as well. A successful CRUD scenario does not verify all parameters, response variants, privileges or eventual effects. Agent listing was tested only with no enrolled agents.
 
