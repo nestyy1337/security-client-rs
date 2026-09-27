@@ -13,11 +13,21 @@ class CoverageTests(unittest.TestCase):
         self.addCleanup(self.directory.cleanup)
         self.root = Path(self.directory.name)
         (self.root / "src").mkdir()
+        (self.root / "tests").mkdir()
         (self.root / "src/fleet.rs").write_text('''
-pub async fn agent(&self, id: &str) -> Result<Value> {
-    self.0.json(self.0.request(Method::GET, Scope::Space, &["api", "fleet", "agents", id])?).await
+impl<'a> Fleet<'a> {
+    pub fn agent(&self, id: &str) -> GetAgent<'a> {
+        GetAgent(self.0.request(Method::GET, Scope::Space, &["api", "fleet", "agents", id]))
+    }
+}
+
+impl GetAgent<'_> {
+    pub fn with_metrics(self, enabled: bool) -> Self {
+        Self(self.0.param("withMetrics", enabled))
+    }
 }
 ''')
+        (self.root / "tests/fleet.rs").write_text("client\n    .fleet()\n    .agent(\"a\")\n")
         self.spec = {"paths": {"/api/fleet/agents/{agentId}": {
             "get": {"operationId": "get-agent"}
         }}}
@@ -55,9 +65,15 @@ pub async fn agent(&self, id: &str) -> Result<Value> {
 
     def test_unrecognized_new_wrapper_fails_closed(self):
         with (self.root / "src/fleet.rs").open("a") as source:
-            source.write("pub async fn new_method(&self) { indirect_request().await }")
+            source.write("pub fn new_method<I: IntoIterator<Item = S>>(&self, x: I) -> X<'a> { indirect() }")
         with self.assertRaisesRegex(ValueError, "Review route extraction for fleet.new_method"):
             wrappers(self.root)
+
+    def test_wrappers_need_an_offline_wire_test(self):
+        (self.root / "tests/fleet.rs").write_text("// no calls")
+        (self.root / "tests/live.rs").write_text("client.fleet().agent(id)")
+        with self.assertRaisesRegex(ValueError, "without an offline wire test.*fleet.agent"):
+            validate(self.root, self.metadata, inventory(self.spec), self.rows)
 
     def test_evidence_inputs_change_when_client_changes(self):
         files = ["src/fleet.rs"]

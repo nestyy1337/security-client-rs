@@ -1,0 +1,825 @@
+mod common;
+
+use common::Mock;
+use kibana_rs::{
+    SortOrder,
+    fleet::{
+        AgentSelection, BulkActionResult, DiagnosticMetric, NewAgentPolicy, NewPackagePolicy,
+        PackageRef, PolicyInput, PolicyStream,
+    },
+};
+use serde_json::{Value, json};
+
+fn policy(id: &str) -> Value {
+    json!({"id": id, "name": "SOC Linux", "namespace": "default", "revision": 3,
+           "status": "active", "agents": 2, "package_policies": [{"id": "pp"}], "is_managed": false})
+}
+
+fn package_policy(id: &str) -> Value {
+    json!({"id": id, "name": "system-1", "namespace": "default", "enabled": true, "revision": 1,
+           "package": {"name": "system", "version": "2.5.0"}, "policy_ids": ["p1"], "inputs": []})
+}
+
+fn ids() -> AgentSelection {
+    AgentSelection::Ids(vec!["one".into(), "two".into()])
+}
+
+#[tokio::test]
+async fn setup_and_enrollment_keys() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    mock.json(json!({"isInitialized": true, "nonFatalErrors": []}));
+    assert_eq!(
+        client
+            .fleet()
+            .setup()
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap()["isInitialized"],
+        true
+    );
+    mock.take()
+        .route("POST", "/s/soc/api/fleet/setup", &[])
+        .no_body();
+
+    let key = json!({"id": "key-id", "api_key_id": "es-key", "api_key": "do-not-log-this-key", "active": true,
+                     "policy_id": "p1", "name": "laptops", "expire_at": "2030-01-01T00:00:00Z"});
+    mock.json(json!({"items": [key], "page": 2, "perPage": 1, "total": 2}));
+    let page = client
+        .fleet()
+        .find_enrollment_keys()
+        .page(2)
+        .per_page(1)
+        .kuery("policy_id:p1")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!((page.page, page.per_page, page.total), (2, 1, 2));
+    assert!(!format!("{:?}", page.items[0]).contains("do-not-log-this-key"));
+    mock.take().route(
+        "GET",
+        "/s/soc/api/fleet/enrollment_api_keys",
+        &[("page", "2"), ("perPage", "1"), ("kuery", "policy_id:p1")],
+    );
+
+    mock.json(json!({"item": key}));
+    let fetched = client
+        .fleet()
+        .get_enrollment_key("key-id")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+        .item;
+    assert_eq!(fetched.api_key, "do-not-log-this-key");
+    assert_eq!(fetched.policy_id.as_deref(), Some("p1"));
+    mock.take()
+        .route("GET", "/s/soc/api/fleet/enrollment_api_keys/key-id", &[]);
+
+    mock.json(json!({"item": key, "action": "created"}));
+    client
+        .fleet()
+        .create_enrollment_key("p1")
+        .name("laptops")
+        .expiration("24h")
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("POST", "/s/soc/api/fleet/enrollment_api_keys", &[])
+        .body(json!({"policy_id": "p1", "name": "laptops", "expiration": "24h"}));
+
+    mock.json(json!({"action": "deleted"}));
+    client
+        .fleet()
+        .revoke_enrollment_key("key-id")
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("DELETE", "/s/soc/api/fleet/enrollment_api_keys/key-id", &[])
+        .no_body();
+}
+
+#[tokio::test]
+async fn agents_are_listed_read_and_managed_individually() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let agent = json!({"id": "a/1", "policy_id": "p1", "active": true, "status": "online",
+                       "local_metadata": {"host": {"hostname": "web-1"}}, "policy_revision": 3, "tags": ["dmz"]});
+    mock.json(json!({"items": [agent], "page": 1, "perPage": 20, "total": 1, "statusSummary": {}}));
+    let page = client
+        .fleet()
+        .find_agents()
+        .page(1)
+        .per_page(20)
+        .kuery("tags:dmz")
+        .show_inactive(true)
+        .sort_field("last_checkin")
+        .sort_order(SortOrder::Desc)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(page.items[0].local_metadata["host"]["hostname"], "web-1");
+    mock.take().route(
+        "GET",
+        "/s/soc/api/fleet/agents",
+        &[
+            ("page", "1"),
+            ("perPage", "20"),
+            ("kuery", "tags:dmz"),
+            ("showInactive", "true"),
+            ("sortField", "last_checkin"),
+            ("sortOrder", "desc"),
+        ],
+    );
+
+    mock.json(json!({"item": agent}));
+    let fetched = client
+        .fleet()
+        .get_agent("a/1")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+        .item;
+    assert_eq!(fetched.extra["policy_revision"], 3);
+    mock.take()
+        .route("GET", "/s/soc/api/fleet/agents/a%2F1", &[]);
+
+    mock.json(json!({"results": {"online": 1}}));
+    client
+        .fleet()
+        .agent_status()
+        .policy_id("p1")
+        .kuery("tags:dmz")
+        .send()
+        .await
+        .unwrap();
+    mock.take().route(
+        "GET",
+        "/s/soc/api/fleet/agent_status",
+        &[("policyId", "p1"), ("kuery", "tags:dmz")],
+    );
+
+    mock.json(json!({}));
+    client
+        .fleet()
+        .reassign_agent("one", "p2")
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("POST", "/s/soc/api/fleet/agents/one/reassign", &[])
+        .body(json!({"policy_id": "p2"}));
+
+    mock.json(json!({}));
+    client.fleet().unenroll_agent("one").send().await.unwrap();
+    mock.take()
+        .route("POST", "/s/soc/api/fleet/agents/one/unenroll", &[])
+        .body(json!({}));
+    mock.json(json!({}));
+    client
+        .fleet()
+        .unenroll_agent("one")
+        .force(true)
+        .revoke(true)
+        .send()
+        .await
+        .unwrap();
+    mock.take().body(json!({"force": true, "revoke": true}));
+
+    mock.json(json!({}));
+    client
+        .fleet()
+        .upgrade_agent("one", "9.5.4")
+        .force(true)
+        .source_uri("https://artifacts.internal/")
+        .skip_rate_limit_check(true)
+        .send()
+        .await
+        .unwrap();
+    mock.take().route("POST", "/s/soc/api/fleet/agents/one/upgrade", &[]).body(json!({
+        "version": "9.5.4", "force": true, "source_uri": "https://artifacts.internal/", "skipRateLimitCheck": true
+    }));
+
+    mock.json(json!({"actionId": "diag"}));
+    let result = client
+        .fleet()
+        .request_agent_diagnostics("one")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(matches!(result, BulkActionResult::Action { action_id } if action_id == "diag"));
+    mock.take()
+        .route(
+            "POST",
+            "/s/soc/api/fleet/agents/one/request_diagnostics",
+            &[],
+        )
+        .body(json!({}));
+    mock.json(json!({"actionId": "diag"}));
+    client
+        .fleet()
+        .request_agent_diagnostics("one")
+        .additional_metrics(vec![DiagnosticMetric::Cpu])
+        .send()
+        .await
+        .unwrap();
+    mock.take().body(json!({"additional_metrics": ["CPU"]}));
+}
+
+#[tokio::test]
+async fn bulk_actions_send_selection_options_and_decode_dry_runs() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let query = || AgentSelection::Query("tags:owned-fixture".into());
+
+    mock.json(json!({"count": 2}));
+    let result = client
+        .fleet()
+        .bulk_upgrade_agents(query(), "9.5.4")
+        .dry_run(true)
+        .batch_size(2)
+        .include_inactive(false)
+        .start_time("2030-01-01T00:00:00Z")
+        .rollout_duration_seconds(600)
+        .force(false)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(matches!(result, BulkActionResult::DryRun { count: 2 }));
+    mock.take().route("POST", "/s/soc/api/fleet/agents/bulk_upgrade", &[]).body(json!({
+        "agents": "tags:owned-fixture", "version": "9.5.4", "dryRun": true, "batchSize": 2,
+        "includeInactive": false, "start_time": "2030-01-01T00:00:00Z", "rollout_duration_seconds": 600,
+        "force": false
+    }));
+
+    mock.json(json!({"actionId": "tags"}));
+    client
+        .fleet()
+        .bulk_update_agent_tags(ids())
+        .add_tags(["investigate"])
+        .remove_tags(["old"])
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route(
+            "POST",
+            "/s/soc/api/fleet/agents/bulk_update_agent_tags",
+            &[],
+        )
+        .body(json!({
+            "agents": ["one", "two"], "tagsToAdd": ["investigate"], "tagsToRemove": ["old"]
+        }));
+
+    mock.json(json!({"actionId": "reassign"}));
+    client
+        .fleet()
+        .bulk_reassign_agents(ids(), "p2")
+        .include_inactive(true)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("POST", "/s/soc/api/fleet/agents/bulk_reassign", &[])
+        .body(json!({"agents": ["one", "two"], "policy_id": "p2", "includeInactive": true}));
+
+    mock.json(json!({"actionId": "unenroll"}));
+    client
+        .fleet()
+        .bulk_unenroll_agents(query())
+        .force(true)
+        .revoke(false)
+        .batch_size(100)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("POST", "/s/soc/api/fleet/agents/bulk_unenroll", &[])
+        .body(json!({
+            "agents": "tags:owned-fixture", "force": true, "revoke": false, "batchSize": 100
+        }));
+
+    mock.json(json!({"actionId": "diagnostics"}));
+    client
+        .fleet()
+        .bulk_request_agent_diagnostics(ids())
+        .additional_metrics(vec![DiagnosticMetric::Cpu])
+        .dry_run(false)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route(
+            "POST",
+            "/s/soc/api/fleet/agents/bulk_request_diagnostics",
+            &[],
+        )
+        .body(json!({
+            "agents": ["one", "two"], "additional_metrics": ["CPU"], "dryRun": false
+        }));
+}
+
+#[tokio::test]
+async fn action_history_cancellation_uploads_and_binary_downloads() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    mock.json(json!({"items": [{"actionId": "mixed", "type": "FUTURE_ACTION", "status": "IN_PROGRESS",
+        "nbAgentsActionCreated": 3, "nbAgentsAck": 1, "nbAgentsFailed": 1, "nbAgentsActioned": 3,
+        "latestErrors": [{"agentId": "failed-agent", "error": "agent unavailable"}], "future_detail": "retained"}]}));
+    let actions = client
+        .fleet()
+        .agent_action_status()
+        .page(0)
+        .per_page(20)
+        .date("2026-09-01T00:00:00Z")
+        .latest(3600)
+        .error_size(5)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(actions.items[0].nb_agents_failed, 1);
+    assert_eq!(actions.items[0].latest_errors[0]["agentId"], "failed-agent");
+    assert_eq!(actions.items[0].extra["future_detail"], "retained");
+    mock.take().route(
+        "GET",
+        "/api/fleet/agents/action_status",
+        &[
+            ("page", "0"),
+            ("perPage", "20"),
+            ("date", "2026-09-01T00:00:00Z"),
+            ("latest", "3600"),
+            ("errorSize", "5"),
+        ],
+    );
+
+    mock.json(json!({"item": {"id": "cancel-id", "type": "CANCEL"}}));
+    assert_eq!(
+        client
+            .fleet()
+            .cancel_agent_action("upgrade/id")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap()["item"]["id"],
+        "cancel-id"
+    );
+    mock.take()
+        .route("POST", "/api/fleet/agents/actions/upgrade%2Fid/cancel", &[])
+        .body(json!({}));
+
+    mock.json(
+        json!({"items": [{"id": "file-1", "name": "diag.zip", "actionId": "diag", "status": "READY",
+                                "createTime": "2026-09-28T00:00:00Z"}]}),
+    );
+    let uploads = client
+        .fleet()
+        .list_agent_uploads("one")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        (
+            uploads.items[0].status.as_str(),
+            uploads.items[0].error.as_deref()
+        ),
+        ("READY", None)
+    );
+    mock.take()
+        .route("GET", "/api/fleet/agents/one/uploads", &[]);
+
+    mock.reply_with(
+        200,
+        vec![("content-type", "application/octet-stream".into())],
+        vec![80, 75, 3, 4, 0, 255],
+    );
+    let bytes = client
+        .fleet()
+        .download_agent_file("file/id", "diagnostics file.zip")
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert_eq!(bytes.as_ref(), &[80, 75, 3, 4, 0, 255]);
+    mock.take().route(
+        "GET",
+        "/api/fleet/agents/files/file%2Fid/diagnostics%20file.zip",
+        &[],
+    );
+}
+
+#[tokio::test]
+async fn agent_policies_lifecycle() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    mock.json(json!({"items": [policy("p1")], "page": 1, "perPage": 50, "total": 1}));
+    let page = client
+        .fleet()
+        .find_agent_policies()
+        .per_page(50)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        (page.items[0].agents, page.items[0].package_policies.len()),
+        (Some(2), 1)
+    );
+    mock.take().route(
+        "GET",
+        "/s/soc/api/fleet/agent_policies",
+        &[
+            ("full", "true"),
+            ("withAgentCount", "true"),
+            ("perPage", "50"),
+        ],
+    );
+    mock.json(json!({"items": [], "page": 2, "perPage": 1, "total": 0}));
+    client
+        .fleet()
+        .find_agent_policies()
+        .full(false)
+        .with_agent_count(false)
+        .page(2)
+        .kuery("name:SOC*")
+        .sort_field("updated_at")
+        .sort_order(SortOrder::Asc)
+        .send()
+        .await
+        .unwrap();
+    mock.take().route(
+        "GET",
+        "/s/soc/api/fleet/agent_policies",
+        &[
+            ("full", "false"),
+            ("withAgentCount", "false"),
+            ("page", "2"),
+            ("kuery", "name:SOC*"),
+            ("sortField", "updated_at"),
+            ("sortOrder", "asc"),
+        ],
+    );
+
+    mock.json(json!({"item": policy("p1")}));
+    let fetched = client
+        .fleet()
+        .get_agent_policy("p1")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+        .item;
+    assert_eq!(fetched.extra["is_managed"], false);
+    mock.take()
+        .route("GET", "/s/soc/api/fleet/agent_policies/p1", &[]);
+
+    let definition = NewAgentPolicy::new("SOC Linux", "default")
+        .description("Linux servers")
+        .monitoring_enabled(["logs", "metrics"])
+        .data_output_id("default-output")
+        .inactivity_timeout(1209600);
+    let expected = json!({"name": "SOC Linux", "namespace": "default", "description": "Linux servers",
+        "monitoring_enabled": ["logs", "metrics"], "data_output_id": "default-output", "inactivity_timeout": 1209600});
+    mock.json(json!({"item": policy("p1")}));
+    client
+        .fleet()
+        .create_agent_policy(&definition)
+        .sys_monitoring(false)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route(
+            "POST",
+            "/s/soc/api/fleet/agent_policies",
+            &[("sys_monitoring", "false")],
+        )
+        .body(expected.clone());
+    mock.json(json!({"item": policy("p2")}));
+    client
+        .fleet()
+        .create_agent_policy(&NewAgentPolicy::new("Minimal", "fixture"))
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("POST", "/s/soc/api/fleet/agent_policies", &[])
+        .body(json!({"name": "Minimal", "namespace": "fixture"}));
+
+    mock.json(json!({"item": policy("p1")}));
+    let updated = client
+        .fleet()
+        .update_agent_policy("p1", &definition)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+        .item;
+    assert_eq!(updated.revision, 3);
+    mock.take()
+        .route("PUT", "/s/soc/api/fleet/agent_policies/p1", &[])
+        .body(expected);
+
+    mock.json(json!({"item": policy("copy")}));
+    client
+        .fleet()
+        .copy_agent_policy("p1", "Copy")
+        .description("Staging")
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("POST", "/s/soc/api/fleet/agent_policies/p1/copy", &[])
+        .body(json!({"name": "Copy", "description": "Staging"}));
+
+    mock.reply_with(
+        200,
+        vec![("content-type", "application/x-yaml".into())],
+        "id: p1\noutputs: {}\n",
+    );
+    let yaml = client
+        .fleet()
+        .download_agent_policy("p1")
+        .standalone(true)
+        .kubernetes(false)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(yaml.starts_with("id: p1"));
+    mock.take().route(
+        "GET",
+        "/s/soc/api/fleet/agent_policies/p1/download",
+        &[("standalone", "true"), ("kubernetes", "false")],
+    );
+
+    mock.json(json!({"id": "p1", "name": "SOC Linux"}));
+    client
+        .fleet()
+        .delete_agent_policy("p1")
+        .force(true)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("POST", "/s/soc/api/fleet/agent_policies/delete", &[])
+        .body(json!({"agentPolicyId": "p1", "force": true}));
+}
+
+#[tokio::test]
+async fn package_policies_use_the_simplified_format() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    mock.json(json!({"items": [package_policy("pp")], "page": 1, "perPage": 10, "total": 1}));
+    let page = client
+        .fleet()
+        .find_package_policies()
+        .page(1)
+        .per_page(10)
+        .kuery("ingest-package-policies.package.name:system")
+        .sort_field("name")
+        .sort_order(SortOrder::Asc)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(page.items[0].package.version, "2.5.0");
+    mock.take().route(
+        "GET",
+        "/s/soc/api/fleet/package_policies",
+        &[
+            ("page", "1"),
+            ("perPage", "10"),
+            ("kuery", "ingest-package-policies.package.name:system"),
+            ("sortField", "name"),
+            ("sortOrder", "asc"),
+        ],
+    );
+
+    mock.json(json!({"item": package_policy("pp")}));
+    assert_eq!(
+        client
+            .fleet()
+            .get_package_policy("pp")
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap()
+            .item
+            .policy_ids,
+        ["p1"]
+    );
+    mock.take()
+        .route("GET", "/s/soc/api/fleet/package_policies/pp", &[]);
+
+    let definition =
+        NewPackagePolicy::new("system-1", "default", PackageRef::new("system", "2.5.0"))
+            .policy_id("p1")
+            .policy_id("p2")
+            .description("Syslog")
+            .input(
+                "system-logfile",
+                PolicyInput::new()
+                    .enabled(true)
+                    .var("preserve_original_event", json!(false))
+                    .stream(
+                        "system.syslog",
+                        PolicyStream::new()
+                            .enabled(true)
+                            .var("paths", json!(["/var/log/syslog"])),
+                    )
+                    .stream("system.auth", PolicyStream::new().enabled(false)),
+            )
+            .input("system-system/metrics", PolicyInput::new().enabled(false));
+    let expected = json!({
+        "name": "system-1", "namespace": "default", "policy_ids": ["p1", "p2"],
+        "package": {"name": "system", "version": "2.5.0"}, "description": "Syslog",
+        "inputs": {
+            "system-logfile": {"enabled": true, "vars": {"preserve_original_event": false}, "streams": {
+                "system.auth": {"enabled": false},
+                "system.syslog": {"enabled": true, "vars": {"paths": ["/var/log/syslog"]}}
+            }},
+            "system-system/metrics": {"enabled": false}
+        }
+    });
+    mock.json(json!({"item": package_policy("pp")}));
+    client
+        .fleet()
+        .create_package_policy(&definition)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route(
+            "POST",
+            "/s/soc/api/fleet/package_policies",
+            &[("format", "simplified")],
+        )
+        .body(expected.clone());
+
+    mock.json(json!({"item": package_policy("pp")}));
+    client
+        .fleet()
+        .update_package_policy("pp", &definition)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route(
+            "PUT",
+            "/s/soc/api/fleet/package_policies/pp",
+            &[("format", "simplified")],
+        )
+        .body(expected);
+
+    mock.json(json!({"id": "pp"}));
+    client
+        .fleet()
+        .delete_package_policy("pp")
+        .force(true)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route(
+            "DELETE",
+            "/s/soc/api/fleet/package_policies/pp",
+            &[("force", "true")],
+        )
+        .no_body();
+}
+
+#[tokio::test]
+async fn packages_and_outputs() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    mock.json(json!({"items": [{"name": "system", "version": "2.5.0", "title": "System", "status": "installed", "categories": ["os_system"]}]}));
+    let packages = client
+        .fleet()
+        .list_packages()
+        .category("security")
+        .prerelease(false)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(packages.items[0].extra["categories"][0], "os_system");
+    mock.take().route(
+        "GET",
+        "/s/soc/api/fleet/epm/packages",
+        &[("category", "security"), ("prerelease", "false")],
+    );
+
+    mock.json(json!({"item": {"name": "system", "version": "2.5.0", "status": "not_installed"}, "metadata": {}}));
+    let package = client
+        .fleet()
+        .get_package("system", "2.5.0")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+        .item;
+    assert_eq!(package.status.as_deref(), Some("not_installed"));
+    mock.take()
+        .route("GET", "/s/soc/api/fleet/epm/packages/system/2.5.0", &[]);
+
+    mock.json(json!({"items": [], "_meta": {"install_source": "registry"}}));
+    client
+        .fleet()
+        .install_package("system", "2.5.0")
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("POST", "/s/soc/api/fleet/epm/packages/system/2.5.0", &[])
+        .body(json!({}));
+    mock.json(json!({"items": []}));
+    client
+        .fleet()
+        .install_package("system", "2.5.0")
+        .force(true)
+        .ignore_constraints(true)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .body(json!({"force": true, "ignore_constraints": true}));
+
+    mock.json(json!({"items": []}));
+    client
+        .fleet()
+        .uninstall_package("system", "2.5.0")
+        .force(true)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route(
+            "DELETE",
+            "/s/soc/api/fleet/epm/packages/system/2.5.0",
+            &[("force", "true")],
+        )
+        .no_body();
+
+    mock.json(json!({"items": [{"id": "default-output", "type": "elasticsearch"}], "total": 1}));
+    assert_eq!(
+        client
+            .fleet()
+            .list_outputs()
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap()["total"],
+        1
+    );
+    mock.take().route("GET", "/s/soc/api/fleet/outputs", &[]);
+}

@@ -1,21 +1,32 @@
-use kibana_rs::{Auth, Client, PageOptions, security::FindRules};
+use kibana_rs::{
+    Kibana,
+    http::{Credentials, TransportBuilder, Url},
+};
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let auth = if let Ok(key) = std::env::var("KIBANA_API_KEY") {
-        Auth::ApiKey(key)
+    let credentials = if let Ok(key) = std::env::var("KIBANA_API_KEY") {
+        Credentials::EncodedApiKey(key)
     } else {
-        Auth::Basic {
-            username: std::env::var("KIBANA_USERNAME")?,
-            password: std::env::var("KIBANA_PASSWORD")?,
-        }
+        Credentials::Basic(
+            std::env::var("KIBANA_USERNAME")?,
+            std::env::var("KIBANA_PASSWORD")?,
+        )
     };
-    let client = Client::builder(std::env::var("KIBANA_URL")?)
-        .auth(auth)
-        .build()?
-        .space(std::env::var("KIBANA_SPACE").unwrap_or("default".into()))?;
+    let transport = TransportBuilder::new(Url::parse(&std::env::var("KIBANA_URL")?)?)
+        .auth(credentials)
+        .build()?;
+    let client =
+        Kibana::new(transport).space(std::env::var("KIBANA_SPACE").unwrap_or("default".into()))?;
 
-    let rules = client.security().rules(&FindRules::default()).await?;
+    let rules = client
+        .security()
+        .find_rules()
+        .per_page(50)
+        .send()
+        .await?
+        .json()
+        .await?;
     println!("{} detection rules, page {}", rules.total, rules.page);
     for rule in rules.data {
         println!(
@@ -26,7 +37,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let policies = client
         .fleet()
-        .agent_policies(&PageOptions::default())
+        .find_agent_policies()
+        .send()
+        .await?
+        .json()
         .await?;
     println!("{} agent policies", policies.total);
     for policy in policies.items {

@@ -7,23 +7,24 @@ use axum::{
     routing::{get, post},
 };
 use kibana_rs::{
-    Auth, Client, Error, PageOptions,
-    cases::{CasePatch, CaseStatus, FindCases, NewCase},
-    fleet::{AgentPolicyRequest, PackagePolicyRequest, PackageRef},
-    security::{FindRules, QueryRule, RulePatch, RuleSelector, Severity},
+    Error, Kibana,
+    cases::{CaseComment, CasePatch, CaseStatus, NewCase, SECURITY_OWNER},
+    fleet::{NewAgentPolicy, NewPackagePolicy, PackageRef},
+    http::{Credentials, TransportBuilder, Url},
+    security::{QueryRule, RuleSelector, Severity},
     spaces::Space,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::{
-    collections::{BTreeMap, VecDeque},
+    collections::VecDeque,
     sync::{Arc, Mutex},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Clone)]
 struct App {
-    client: Client,
+    client: Kibana,
     space: String,
     activity: Arc<Mutex<VecDeque<Activity>>>,
 }
@@ -63,13 +64,7 @@ impl IntoResponse for ApiError {
             .status()
             .filter(|s| s.is_client_error())
             .unwrap_or(StatusCode::BAD_GATEWAY);
-        let message = match &self.0 {
-            Error::Api { body, .. } => serde_json::from_str::<Value>(body)
-                .ok()
-                .and_then(|v| v.get("message").and_then(Value::as_str).map(str::to_owned))
-                .unwrap_or_else(|| self.0.to_string()),
-            _ => self.0.to_string(),
-        };
+        let message = self.0.message().unwrap_or_else(|| self.0.to_string());
         (
             status,
             Json(json!({"error":message,"status":status.as_u16()})),
@@ -82,18 +77,20 @@ type ApiResult<T> = std::result::Result<Json<T>, ApiError>;
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_env_filter("info").init();
-    let auth = if let Ok(key) = std::env::var("KIBANA_API_KEY") {
-        Auth::ApiKey(key)
+    let credentials = if let Ok(key) = std::env::var("KIBANA_API_KEY") {
+        Credentials::EncodedApiKey(key)
     } else {
-        Auth::Basic {
-            username: std::env::var("KIBANA_USERNAME").unwrap_or("elastic".into()),
-            password: std::env::var("KIBANA_PASSWORD")?,
-        }
+        Credentials::Basic(
+            std::env::var("KIBANA_USERNAME").unwrap_or("elastic".into()),
+            std::env::var("KIBANA_PASSWORD")?,
+        )
     };
-    let root = Client::builder(std::env::var("KIBANA_URL")?)
-        .auth(auth)
-        .timeout(Duration::from_secs(180))
-        .build()?;
+    let root = Kibana::new(
+        TransportBuilder::new(Url::parse(&std::env::var("KIBANA_URL")?)?)
+            .auth(credentials)
+            .timeout(Duration::from_secs(180))
+            .build()?,
+    );
     let space = std::env::var("KIBANA_SPACE").unwrap_or("kibana-rs".into());
     if std::env::args().any(|arg| arg == "--seed") {
         seed(&root, &space).await?;
@@ -227,17 +224,10 @@ impl ListQuery {
     fn page(&self) -> u32 {
         self.page.unwrap_or(1).max(1)
     }
-    fn fleet(&self) -> PageOptions {
-        PageOptions {
-            page: self.page(),
-            per_page: 50,
-            kuery: None,
-        }
-    }
 }
 
 async fn status(State(a): State<App>) -> ApiResult<Value> {
-    let s = a.client.status().await?;
+    let s = a.client.status().send().await?.json().await?;
     Ok(Json(
         json!({"version":s["version"]["number"],"health":s["status"]["overall"]["level"],"space":a.space}),
     ))
@@ -247,37 +237,42 @@ async fn summary(State(a): State<App>) -> ApiResult<Value> {
         async {
             a.client
                 .security()
-                .rules(&FindRules {
-                    per_page: 1,
-                    ..Default::default()
-                })
+                .find_rules()
+                .per_page(1)
+                .send()
+                .await?
+                .json()
                 .await
         },
         async {
             a.client
                 .cases()
-                .find(&FindCases {
-                    per_page: 1,
-                    ..Default::default()
-                })
+                .find()
+                .owner(SECURITY_OWNER)
+                .per_page(1)
+                .send()
+                .await?
+                .json()
                 .await
         },
         async {
             a.client
                 .fleet()
-                .agent_policies(&PageOptions {
-                    per_page: 1,
-                    ..Default::default()
-                })
+                .find_agent_policies()
+                .per_page(1)
+                .send()
+                .await?
+                .json()
                 .await
         },
         async {
             a.client
                 .fleet()
-                .agents(&PageOptions {
-                    per_page: 1,
-                    ..Default::default()
-                })
+                .find_agents()
+                .per_page(1)
+                .send()
+                .await?
+                .json()
                 .await
         }
     );
@@ -289,24 +284,24 @@ async fn activity(State(a): State<App>) -> Json<Value> {
     Json(json!({"items":a.activity.lock().unwrap_or_else(|p|p.into_inner()).clone()}))
 }
 async fn rules(State(a): State<App>, Query(q): Query<ListQuery>) -> ApiResult<Value> {
-    Ok(Json(
-        serde_json::to_value(
-            a.client
-                .security()
-                .rules(&FindRules {
-                    page: q.page(),
-                    per_page: 50,
-                    filter: None,
-                })
-                .await?,
-        )
-        .map_err(Error::from)?,
-    ))
+    let page = a
+        .client
+        .security()
+        .find_rules()
+        .page(q.page())
+        .per_page(50)
+        .send()
+        .await?;
+    Ok(Json(page.json_as().await?))
 }
 async fn rule(State(a): State<App>, Path(id): Path<String>) -> ApiResult<Value> {
-    Ok(Json(json!(
-        a.client.security().rule(RuleSelector::Id(&id)).await?
-    )))
+    let rule = a
+        .client
+        .security()
+        .get_rule(RuleSelector::Id(&id))
+        .send()
+        .await?;
+    Ok(Json(rule.json_as().await?))
 }
 #[derive(Deserialize)]
 struct RuleForm {
@@ -317,11 +312,18 @@ struct RuleForm {
     index: Vec<String>,
 }
 async fn create_rule(State(a): State<App>, Json(form): Json<RuleForm>) -> ApiResult<Value> {
-    let mut input = QueryRule::new(form.name, form.description, form.query);
-    input.severity = form.severity;
-    input.index = form.index;
-    input.tags = vec!["kibana-rs".into()];
-    let rule = a.client.security().create_rule(&input).await?;
+    let input = QueryRule::new(form.name, form.description, form.query)
+        .severity(form.severity)
+        .index(form.index)
+        .tags(["kibana-rs"]);
+    let rule = a
+        .client
+        .security()
+        .create_rule(&input)
+        .send()
+        .await?
+        .json()
+        .await?;
     a.record("Created detection rule", &rule.name);
     Ok(Json(json!(rule)))
 }
@@ -337,20 +339,20 @@ async fn update_rule(
     Path(id): Path<String>,
     Json(form): Json<RuleChange>,
 ) -> ApiResult<Value> {
-    let rule = a
-        .client
-        .security()
-        .update_rule(
-            RuleSelector::Id(&id),
-            &RulePatch {
-                enabled: form.enabled,
-                name: form.name,
-                query: form.query,
-                description: form.description,
-                ..Default::default()
-            },
-        )
-        .await?;
+    let mut patch = a.client.security().patch_rule(RuleSelector::Id(&id));
+    if let Some(enabled) = form.enabled {
+        patch = patch.enabled(enabled);
+    }
+    if let Some(name) = &form.name {
+        patch = patch.name(name);
+    }
+    if let Some(query) = &form.query {
+        patch = patch.query(query);
+    }
+    if let Some(description) = &form.description {
+        patch = patch.description(description);
+    }
+    let rule = patch.send().await?.json().await?;
     a.record("Updated detection rule", &rule.name);
     Ok(Json(json!(rule)))
 }
@@ -359,17 +361,34 @@ async fn delete_rule(State(a): State<App>, Path(id): Path<String>) -> ApiResult<
         .client
         .security()
         .delete_rule(RuleSelector::Id(&id))
+        .send()
+        .await?
+        .json()
         .await?;
     a.record("Deleted detection rule", &rule.name);
     Ok(Json(json!({"deleted":id})))
 }
 async fn policies(State(a): State<App>, Query(q): Query<ListQuery>) -> ApiResult<Value> {
-    Ok(Json(json!(
-        a.client.fleet().agent_policies(&q.fleet()).await?
-    )))
+    let page = a
+        .client
+        .fleet()
+        .find_agent_policies()
+        .page(q.page())
+        .per_page(50)
+        .send()
+        .await?;
+    Ok(Json(page.json_as().await?))
 }
 async fn policy(State(a): State<App>, Path(id): Path<String>) -> ApiResult<Value> {
-    Ok(Json(json!(a.client.fleet().agent_policy(&id).await?)))
+    let policy = a
+        .client
+        .fleet()
+        .get_agent_policy(&id)
+        .send()
+        .await?
+        .json()
+        .await?;
+    Ok(Json(json!(policy.item)))
 }
 #[derive(Deserialize)]
 struct PolicyForm {
@@ -378,10 +397,20 @@ struct PolicyForm {
     description: Option<String>,
 }
 async fn create_policy(State(a): State<App>, Json(form): Json<PolicyForm>) -> ApiResult<Value> {
-    let mut request = AgentPolicyRequest::new(form.name, form.namespace);
-    request.description = form.description;
-    request.monitoring_enabled = Some(vec![]);
-    let result = a.client.fleet().create_agent_policy(&request).await?;
+    let mut request =
+        NewAgentPolicy::new(form.name, form.namespace).monitoring_enabled(Vec::<String>::new());
+    if let Some(description) = form.description {
+        request = request.description(description);
+    }
+    let result = a
+        .client
+        .fleet()
+        .create_agent_policy(&request)
+        .send()
+        .await?
+        .json()
+        .await?
+        .item;
     a.record("Created agent policy", &result.name);
     Ok(Json(json!(result)))
 }
@@ -390,19 +419,37 @@ async fn update_policy(
     Path(id): Path<String>,
     Json(form): Json<PolicyForm>,
 ) -> ApiResult<Value> {
-    let mut request = AgentPolicyRequest::new(form.name, form.namespace);
-    request.description = form.description;
-    let result = a.client.fleet().update_agent_policy(&id, &request).await?;
+    let mut request = NewAgentPolicy::new(form.name, form.namespace);
+    if let Some(description) = form.description {
+        request = request.description(description);
+    }
+    let result = a
+        .client
+        .fleet()
+        .update_agent_policy(&id, &request)
+        .send()
+        .await?
+        .json()
+        .await?
+        .item;
     a.record("Updated agent policy", &result.name);
     Ok(Json(json!(result)))
 }
 async fn delete_policy(State(a): State<App>, Path(id): Path<String>) -> ApiResult<Value> {
-    let result = a.client.fleet().delete_agent_policy(&id).await?;
+    let result = a
+        .client
+        .fleet()
+        .delete_agent_policy(&id)
+        .send()
+        .await?
+        .json()
+        .await?;
     a.record("Deleted agent policy", &id);
     Ok(Json(result))
 }
 async fn integrations(State(a): State<App>) -> ApiResult<Value> {
-    Ok(Json(json!(a.client.fleet().integrations().await?)))
+    let packages = a.client.fleet().list_packages().send().await?;
+    Ok(Json(packages.json_as().await?))
 }
 async fn install_integration(
     State(a): State<App>,
@@ -411,15 +458,24 @@ async fn install_integration(
     let result = a
         .client
         .fleet()
-        .install_integration(&name, &version)
+        .install_package(&name, &version)
+        .send()
+        .await?
+        .json()
         .await?;
     a.record("Installed integration", &format!("{name} {version}"));
     Ok(Json(result))
 }
 async fn package_policies(State(a): State<App>, Query(q): Query<ListQuery>) -> ApiResult<Value> {
-    Ok(Json(json!(
-        a.client.fleet().package_policies(&q.fleet()).await?
-    )))
+    let page = a
+        .client
+        .fleet()
+        .find_package_policies()
+        .page(q.page())
+        .per_page(50)
+        .send()
+        .await?;
+    Ok(Json(page.json_as().await?))
 }
 #[derive(Deserialize)]
 struct PackageForm {
@@ -433,43 +489,64 @@ async fn create_package_policy(
     State(a): State<App>,
     Json(form): Json<PackageForm>,
 ) -> ApiResult<Value> {
-    let request = PackagePolicyRequest {
-        name: form.name,
-        namespace: form.namespace,
-        policy_ids: vec![form.policy_id],
-        package: PackageRef {
-            name: form.package,
-            version: form.version,
-        },
-        inputs: BTreeMap::new(),
-        description: None,
-    };
-    let result = a.client.fleet().create_package_policy(&request).await?;
+    let request = NewPackagePolicy::new(
+        form.name,
+        form.namespace,
+        PackageRef::new(form.package, form.version),
+    )
+    .policy_id(form.policy_id);
+    let result = a
+        .client
+        .fleet()
+        .create_package_policy(&request)
+        .send()
+        .await?
+        .json()
+        .await?
+        .item;
     a.record("Assigned integration", &result.name);
     Ok(Json(json!(result)))
 }
 async fn delete_package_policy(State(a): State<App>, Path(id): Path<String>) -> ApiResult<Value> {
-    let result = a.client.fleet().delete_package_policy(&id).await?;
+    let result = a
+        .client
+        .fleet()
+        .delete_package_policy(&id)
+        .send()
+        .await?
+        .json()
+        .await?;
     a.record("Removed integration policy", &id);
     Ok(Json(result))
 }
 async fn agents(State(a): State<App>, Query(q): Query<ListQuery>) -> ApiResult<Value> {
-    Ok(Json(json!(a.client.fleet().agents(&q.fleet()).await?)))
+    let page = a
+        .client
+        .fleet()
+        .find_agents()
+        .page(q.page())
+        .per_page(50)
+        .send()
+        .await?;
+    Ok(Json(page.json_as().await?))
 }
 async fn cases(State(a): State<App>, Query(q): Query<ListQuery>) -> ApiResult<Value> {
-    Ok(Json(json!(
-        a.client
-            .cases()
-            .find(&FindCases {
-                page: q.page(),
-                search: q.search,
-                ..Default::default()
-            })
-            .await?
-    )))
+    let mut find = a
+        .client
+        .cases()
+        .find()
+        .owner(SECURITY_OWNER)
+        .page(q.page())
+        .per_page(50);
+    if let Some(search) = &q.search {
+        find = find.search(search);
+    }
+    Ok(Json(find.send().await?.json_as().await?))
 }
 async fn case(State(a): State<App>, Path(id): Path<String>) -> ApiResult<Value> {
-    Ok(Json(json!(a.client.cases().get(&id).await?)))
+    Ok(Json(
+        a.client.cases().get(&id).send().await?.json_as().await?,
+    ))
 }
 #[derive(Deserialize)]
 struct CaseForm {
@@ -478,10 +555,17 @@ struct CaseForm {
     severity: Severity,
 }
 async fn create_case(State(a): State<App>, Json(form): Json<CaseForm>) -> ApiResult<Value> {
-    let mut request = NewCase::security(form.title, form.description);
-    request.severity = form.severity;
-    request.tags = vec!["kibana-rs".into()];
-    let result = a.client.cases().create(&request).await?;
+    let request = NewCase::security(form.title, form.description)
+        .severity(form.severity)
+        .tags(["kibana-rs"]);
+    let result = a
+        .client
+        .cases()
+        .create(&request)
+        .send()
+        .await?
+        .json()
+        .await?;
     a.record("Opened security case", &result.title);
     Ok(Json(json!(result)))
 }
@@ -499,29 +583,34 @@ async fn update_case(
         "open" => CaseStatus::Open,
         "in-progress" => CaseStatus::InProgress,
         "closed" => CaseStatus::Closed,
-        _ => return Err(Error::Configuration("invalid case status".into()).into()),
+        _ => return Err(Error::InvalidRequest("invalid case status".into()).into()),
     };
+    let patch = CasePatch::new(&id, &form.version).status(status);
     let result = a
         .client
         .cases()
-        .update(&[CasePatch {
-            id: &id,
-            version: &form.version,
-            status: Some(status),
-            title: None,
-            severity: None,
-        }])
+        .update([patch])
+        .send()
+        .await?
+        .json()
         .await?;
     a.record("Updated case status", &id);
     Ok(Json(json!(result)))
 }
 async fn delete_case(State(a): State<App>, Path(id): Path<String>) -> ApiResult<Value> {
-    a.client.cases().delete(&[&id]).await?;
+    a.client.cases().delete([&id]).send().await?;
     a.record("Deleted security case", &id);
     Ok(Json(json!({"deleted":id})))
 }
 async fn comments(State(a): State<App>, Path(id): Path<String>) -> ApiResult<Value> {
-    Ok(Json(a.client.cases().comments(&id, 1, 100).await?))
+    let page = a
+        .client
+        .cases()
+        .find_comments(&id)
+        .per_page(100)
+        .send()
+        .await?;
+    Ok(Json(page.json_as().await?))
 }
 #[derive(Deserialize)]
 struct CommentForm {
@@ -532,33 +621,32 @@ async fn comment(
     Path(id): Path<String>,
     Json(form): Json<CommentForm>,
 ) -> ApiResult<Value> {
+    let comment = CaseComment::user(SECURITY_OWNER, form.comment);
     let result = a
         .client
         .cases()
-        .comment(&id, "securitySolution", &form.comment)
+        .add_comment(&id, &comment)
+        .send()
+        .await?
+        .json()
         .await?;
     a.record("Added case comment", &id);
-    Ok(Json(result))
+    Ok(Json(json!(result)))
 }
 
-async fn seed(root: &Client, space: &str) -> Result<(), Error> {
-    match root.spaces().get(space).await {
+async fn seed(root: &Kibana, space: &str) -> Result<(), Error> {
+    match root.spaces().get(space).send().await {
         Ok(_) => {}
         Err(e) if e.status() == Some(StatusCode::NOT_FOUND) => {
-            root.spaces()
-                .create(&Space {
-                    id: space.into(),
-                    name: "Security lab".into(),
-                    description: "Isolated kibana-rs demonstration".into(),
-                    disabled_features: vec![],
-                })
-                .await?;
+            let mut definition = Space::new(space, "Security lab");
+            definition.description = Some("Isolated kibana-rs demonstration".into());
+            root.spaces().create(&definition).send().await?;
         }
         Err(e) => return Err(e),
     }
     let client = root.space(space)?;
-    client.security().initialize().await?;
-    client.fleet().setup().await?;
+    client.security().create_alerts_index().send().await?;
+    client.fleet().setup().send().await?;
     let definitions = [
         (
             "krs-demo-auth",
@@ -580,39 +668,54 @@ async fn seed(root: &Client, space: &str) -> Result<(), Error> {
         ),
     ];
     for (id, name, query, severity) in definitions {
-        match client.security().rule(RuleSelector::RuleId(id)).await {
+        match client
+            .security()
+            .get_rule(RuleSelector::RuleId(id))
+            .send()
+            .await
+        {
             Ok(_) => continue,
             Err(e) if e.status() == Some(StatusCode::NOT_FOUND) => {}
             Err(e) => return Err(e),
         }
-        let mut rule = QueryRule::new(
+        let rule = QueryRule::new(
             name,
             "Demonstration detection rule. No production events are connected.",
             query,
-        );
-        rule.rule_id = Some(id.into());
-        rule.severity = severity;
-        rule.tags = vec!["kibana-rs".into(), "demo".into()];
-        client.security().create_rule(&rule).await?;
+        )
+        .rule_id(id)
+        .severity(severity)
+        .tags(["kibana-rs", "demo"]);
+        client.security().create_rule(&rule).send().await?;
     }
-    let existing = client.cases().find(&FindCases::default()).await?;
+    let existing = client
+        .cases()
+        .find()
+        .owner(SECURITY_OWNER)
+        .send()
+        .await?
+        .json()
+        .await?;
     for title in [
         "Privileged authentication review",
         "Linux endpoint coverage review",
     ] {
         if !existing.cases.iter().any(|c| c.title == title) {
-            let mut case = NewCase::security(
+            let case = NewCase::security(
                 title,
                 "Sample investigation created by kibana-rs. This is demonstration data, not a production incident.",
-            );
-            case.tags = vec!["demo".into(), "security".into()];
-            case.severity = Severity::Medium;
-            client.cases().create(&case).await?;
+            )
+            .tags(["demo", "security"])
+            .severity(Severity::Medium);
+            client.cases().create(&case).send().await?;
         }
     }
     let mut policies = client
         .fleet()
-        .agent_policies(&PageOptions::default())
+        .find_agent_policies()
+        .send()
+        .await?
+        .json()
         .await?
         .items;
     for (name, description) in [
@@ -626,13 +729,22 @@ async fn seed(root: &Client, space: &str) -> Result<(), Error> {
         ),
     ] {
         if !policies.iter().any(|p| p.name == name) {
-            let mut policy = AgentPolicyRequest::new(name, "default");
-            policy.description = Some(description.into());
-            policy.monitoring_enabled = Some(vec![]);
-            policies.push(client.fleet().create_agent_policy(&policy).await?);
+            let policy = NewAgentPolicy::new(name, "default")
+                .description(description)
+                .monitoring_enabled(Vec::<String>::new());
+            policies.push(
+                client
+                    .fleet()
+                    .create_agent_policy(&policy)
+                    .send()
+                    .await?
+                    .json()
+                    .await?
+                    .item,
+            );
         }
     }
-    let packages = client.fleet().integrations().await?;
+    let packages = client.fleet().list_packages().send().await?.json().await?;
     let package = packages
         .items
         .iter()
@@ -640,11 +752,15 @@ async fn seed(root: &Client, space: &str) -> Result<(), Error> {
         .ok_or_else(|| Error::Configuration("system integration missing from registry".into()))?;
     client
         .fleet()
-        .install_integration(&package.name, &package.version)
+        .install_package(&package.name, &package.version)
+        .send()
         .await?;
     let installed = client
         .fleet()
-        .package_policies(&PageOptions::default())
+        .find_package_policies()
+        .send()
+        .await?
+        .json()
         .await?;
     if !installed
         .items
@@ -655,19 +771,17 @@ async fn seed(root: &Client, space: &str) -> Result<(), Error> {
             .iter()
             .find(|p| p.name == "SOC Linux endpoints")
             .unwrap();
+        let telemetry = NewPackagePolicy::new(
+            "Linux system telemetry",
+            "default",
+            PackageRef::new(&package.name, &package.version),
+        )
+        .policy_id(&policy.id)
+        .description("System logs and metrics for the demo policy");
         client
             .fleet()
-            .create_package_policy(&PackagePolicyRequest {
-                name: "Linux system telemetry".into(),
-                namespace: "default".into(),
-                policy_ids: vec![policy.id.clone()],
-                package: PackageRef {
-                    name: package.name.clone(),
-                    version: package.version.clone(),
-                },
-                inputs: BTreeMap::new(),
-                description: Some("System logs and metrics for the demo policy".into()),
-            })
+            .create_package_policy(&telemetry)
+            .send()
             .await?;
     }
     Ok(())

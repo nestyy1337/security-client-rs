@@ -35,23 +35,29 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ```rust
-use kibana_rs::{Auth, Client, PageOptions, security::{FindRules, QueryRule}};
+use kibana_rs::{
+    Kibana,
+    http::{Credentials, TransportBuilder, Url},
+    security::{QueryRule, Severity},
+};
 
 async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    let client = Client::builder(std::env::var("KIBANA_URL")?)
-        .auth(Auth::ApiKey(std::env::var("KIBANA_API_KEY")?))
-        .build()?
-        .space("soc")?;
+    let transport = TransportBuilder::new(Url::parse(&std::env::var("KIBANA_URL")?)?)
+        .auth(Credentials::EncodedApiKey(std::env::var("KIBANA_API_KEY")?))
+        .build()?;
+    let client = Kibana::new(transport).space("soc")?;
 
-    let rules = client.security().rules(&FindRules::default()).await?;
-    let policies = client.fleet().agent_policies(&PageOptions::default()).await?;
+    let rules = client.security().find_rules().per_page(100).send().await?.json().await?;
+    let policies = client.fleet().find_agent_policies().send().await?.json().await?;
+    println!("{} rules, {} agent policies", rules.total, policies.total);
 
     let request = QueryRule::new(
         "Failed authentication",
         "Review failed authentication events",
         "event.category: authentication and event.outcome: failure",
-    );
-    let rule = client.security().create_rule(&request).await?;
+    )
+    .severity(Severity::High);
+    let rule = client.security().create_rule(&request).send().await?.json().await?;
     assert!(!rule.enabled);
     Ok(())
 }
@@ -59,45 +65,59 @@ async fn example() -> Result<(), Box<dyn std::error::Error>> {
 
 The executable [security example](examples/security.rs) only reads rules and policies. Run it with `nix develop -c cargo run --example security`, supplying `KIBANA_URL`, `KIBANA_SPACE`, and either `KIBANA_API_KEY` or `KIBANA_USERNAME`/`KIBANA_PASSWORD`.
 
+### Structure
+
+The layout follows the official [Elasticsearch Rust client](https://github.com/elastic/elasticsearch-rs):
+
+- `http::Transport` owns the connection pool, credentials, default headers, timeouts, TLS roots, proxy and response limit. `TransportBuilder` configures it; `Transport::cloud` resolves the Kibana endpoint from an Elastic Cloud ID. `Transport::send` is the single path every request takes.
+- `Kibana` wraps a transport and an optional space. Namespace methods (`security()`, `cases()`, `exceptions()`, `fleet()`, `spaces()`, `roles()`) return endpoint builders.
+- Each endpoint is its own builder type. Required path and body parameters are method arguments; optional parameters are setters. Every builder has `header()` and `request_timeout()` for per-request overrides and `send()`, which returns `Response<T>`.
+- `Response<T>::json()` decodes into the endpoint's type. `json_as::<U>()`, `text()`, `bytes()` and `bytes_stream()` are always available. Endpoints without a body use `Response<Empty>`; NDJSON exports, YAML policies and diagnostic archives use `Response<Raw>`, which has no `json()`.
+- Request bodies such as `QueryRule`, `NewCase`, `NewList` and `NewAgentPolicy` are builders. Create and replace endpoints accept any `Serialize` value, so rule types or fields without a typed builder can be sent as JSON.
+- Response structs and the `Error` enum are `#[non_exhaustive]`. Most responses keep unmodeled fields in an `extra` map.
+- reqwest is an implementation detail. Public HTTP types come from the `http` and `url` crates.
+
+One deliberate difference from the Elasticsearch client: `send()` turns non-success statuses into `Error::Api` instead of returning them for the caller to check. A forgotten status check there turns a 403 into a confusing decode error.
+
 ### Coverage
 
-See the [generated inventory](docs/api-coverage.md) for current counts and per-operation limitations.
+See the [generated inventory](docs/api-coverage.md) for current counts and per-operation limitations. Every named endpoint has an offline wire-contract test that asserts its method, path, query and body against a recording mock; the coverage checker fails when one is missing.
 
-| Module | Included |
+| Namespace | Included |
 | --- | --- |
-| `security()` | Query-rule creation, list/get/patch/delete, rule import/export, privilege inspection, alert-index initialization |
-| `cases()` | Search/get/create/update/delete, comments, optimistic concurrency through case versions |
-| `exceptions()` | List/item CRUD and pagination; typed conditions; optimistic concurrency; duplicate/import/export and OS summaries |
-| `fleet()` | Policies and integrations; enrollment tokens; individual/bulk agent operations; upgrades, diagnostics, action history and binary downloads; status and output listing |
+| `security()` | Query-rule creation, find/get/patch/delete, rule import/export, privilege inspection, alert-index initialization |
+| `cases()` | Find/get/create/update/delete, comments, optimistic concurrency through case versions |
+| `exceptions()` | List/item CRUD and search; typed conditions; optimistic concurrency; duplicate/import/export and OS summaries |
+| `fleet()` | Policies and packages; enrollment keys; individual/bulk agent operations; upgrades, diagnostics, action history and binary downloads; status and output listing |
 | `spaces()` | Global space CRUD/list |
 | `roles()` | Global role list/get/put/delete with Kibana privileges |
 
-Stable resource fields have Rust types. Responses retain additional fields where they matter for extensibility. Integration input variables and Elasticsearch privilege definitions remain JSON because their schemas depend on the package or Elasticsearch. Query-rule creation supports KQL and Lucene. Other detection-rule types can be read, patched in common fields, imported/exported, or created through the raw request API; they do not yet have dedicated creation types.
+Stable resource fields have Rust types. Integration input variables and Elasticsearch privilege definitions remain JSON because their schemas depend on the package or Elasticsearch. Query-rule creation supports KQL and Lucene. Other detection-rule types can be read, patched through `PatchRule::field`, imported/exported, or created from JSON.
 
-Pagination is explicit. `rules`, `find`, and Fleet collection methods return one page and a total. Do not interpret the first page as the complete collection.
+Pagination is explicit. `find_*` methods return one page and a total. Do not interpret the first page as the complete collection.
 
 ### Exceptions and agent operations
 
-`client.exceptions()` manages detection exception lists and items. Entries support match, match-any, exists, wildcard, value-list references and nested conditions. `NamespaceType::Single` isolates lists to the selected Kibana space; `Agnostic` shares them across spaces. Updates require an explicit opaque `_version` token from the last read, separately from the optional user-defined numeric version.
+`client.exceptions()` manages detection exception lists and items. Entries support match, match-any, exists, wildcard, value-list references and nested conditions. `NamespaceType::Single` isolates lists to the selected Kibana space; `Agnostic` shares them across spaces. `update_list` and `update_item` require the opaque `_version` token from the last read, separately from the optional user-defined numeric version.
 
-Attach `list.reference()` through `QueryRule::exceptions_list` or `RulePatch::exceptions_list`. Patching this array replaces all associations, so preserve the references you want to keep. An empty array detaches every list. Exception import preserves per-object errors even on HTTP 200. Export requires both the saved-object ID and `list_id`, provided by `ListReference`. Imports can regenerate saved-object IDs; read back by `list_id`/`item_id` before reusing references. Referenced value-list contents need separate management and are not included in exports. Kibana's OS summary can report zero without OS-labelled items; `items().total` is the item count.
+Attach `list.reference()` through `QueryRule::exceptions_list` or `PatchRule::exceptions_list`. Patching this array replaces all associations, so preserve the references you want to keep. An empty array detaches every list. Exception import preserves per-object errors even on HTTP 200. Export requires both the saved-object ID and `list_id`, provided by `ListReference`. Imports can regenerate saved-object IDs; read back by `list_id`/`item_id` before reusing references. Referenced value-list contents need separate management and are not included in exports. Kibana's OS summary can report zero without OS-labelled items; `find_items().total` is the item count.
 
-Fleet bulk methods accept explicit IDs or a KQL query through `BulkAgents`. Set `dry_run = true` to get the selected count. Dry runs do not validate every agent's eligibility. Actual submissions return an action ID; inspect `agent_actions()` for completion, failure counts and sampled errors, then verify the agent state. Action-history pages start at zero; collection pages start at one.
+Fleet bulk methods accept explicit IDs or a KQL query through `AgentSelection`. `dry_run(true)` returns the selected count. Dry runs do not validate every agent's eligibility. Actual submissions return an action ID; inspect `agent_action_status()` for completion, failure counts and sampled errors, then verify the agent state. Action-history pages start at zero; collection pages start at one. Fleet wraps single resources as `{"item": ...}`, so those endpoints decode into `Item<T>`.
 
-Enrollment keys support policy selection, names, expiry, listing and revocation. Their `Debug` output redacts credentials. Revoking an enrollment key does not unenroll existing agents. Diagnostics requests are asynchronous: correlate the action ID with `agent_uploads()`, wait for `READY`, then stream `download_agent_file()`. Diagnostic archives can contain sensitive configuration.
+Enrollment keys support policy selection, names, expiry, listing and revocation. Their `Debug` output redacts credentials. Revoking an enrollment key does not unenroll existing agents. Diagnostics requests are asynchronous: correlate the action ID with `list_agent_uploads()`, wait for `READY`, then download with `download_agent_file()`. Diagnostic archives can contain sensitive configuration.
 
 Upgrade and cancellation methods have wire-contract tests, but the container fixture cannot prove a successful binary upgrade. Cancellation applies to upgrades and unenrollment, not arbitrary actions. Scheduled upgrade behavior and successful cancellation need a service-installed Agent and the relevant license profile. See the [contract research](research/fleet-agent-operations.md) and [deployment test limits](tests/deployment/README.md).
 
 ### Request behavior
 
-- API key, Basic, and Bearer authentication; custom root certificates and headers; request/connect timeouts.
-- Space selection shares the connection pool. Global routes remain global. URL construction preserves reverse-proxy base paths and encodes each resource identifier separately.
+- API key (encoded or ID/secret), Basic and Bearer credentials; additional root certificates; transport-wide and per-request headers and timeouts; explicit or disabled proxies. Proxy environment variables are honored unless `disable_proxy()` is set.
+- Space selection shares the connection pool. Global routes remain global. URL construction preserves reverse-proxy base paths and percent-encodes each path segment separately.
 - No automatic redirects or retries. An interrupted mutation can have an unknown outcome and must be reconciled by the caller.
-- JSON responses have a configurable 32 MiB default limit. Errors retain HTTP status, headers, and at most 16 KiB of body. Error bodies may contain operational data.
-- Rule exports and policy downloads return streaming `reqwest::Response` values. Rule import preserves partial-failure results even on HTTP 200.
-- `request(method, scope, segments)` exposes the configured HTTP client. Pass the resulting builder to `execute` for checked streaming responses or `json` for bounded decoding. It also supports endpoints without a named wrapper.
+- `json()`, `bytes()` and `text()` stop at a configurable 32 MiB limit; `bytes_stream()` is unbounded. Errors retain HTTP status, headers, and at most 16 KiB of body; `Error::message()` extracts Kibana's `message` field. Error bodies may contain operational data and are kept out of `Display`.
+- Invalid path segments and body serialization failures are reported by `send()` before any request is made.
+- `Kibana::request(method, scope, segments)` builds a request to any route without a named builder. `Transport::send` accepts a pre-encoded path for full control.
 
-Date-based `elastic-api-version` headers can be supplied through `ClientBuilder::headers` when a particular deployment or endpoint requires one. No blanket Serverless compatibility is claimed.
+Date-based `elastic-api-version` headers can be set on the transport or per request when a deployment or endpoint requires one. No blanket Serverless compatibility is claimed.
 
 ## Run your own isolated demo
 

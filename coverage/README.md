@@ -25,7 +25,7 @@ After reviewing a manifest change, regenerate and commit the report:
 nix develop -c uv run tools/api_coverage.py --fetch
 ```
 
-CI rejects stale reports, mismatched upstream hashes, missing or duplicate manifest entries, changed route mappings, and missing evidence-test references. The parser deliberately supports the crate's current direct request convention. A new helper or dynamic route shape requires extending the checker explicitly; it must not silently disappear from the count. This is a source inventory check, not a Rust semantic analyzer or a wire-contract test.
+CI rejects stale reports, mismatched upstream hashes, missing or duplicate manifest entries, changed route mappings, missing evidence-test references, and named wrappers without an offline wire test. The parser recognizes the crate's builder convention: a namespace method taking `&self` builds exactly one `.request(Method::X, Scope::Y, &[...])`. Any other public `&self` method in an endpoint module fails the check unless it is listed as a non-endpoint helper, so a new helper or dynamic route shape cannot silently disappear from the count. A wrapper counts as wire-tested when an offline test in `tests/` (excluding the live suites) calls it through its namespace. This is a source inventory check, not a Rust semantic analyzer; the wire tests themselves assert request shape.
 
 The historical evidence stores its original source commit and a fingerprint of the client, dependency lock and test inputs. If those inputs change, the report labels that evidence stale. Do not update that fingerprint to turn the label green without a corresponding run. The record remains historical. Current deployment runs emit separate machine-readable reports tied to the source revision and fixture hashes.
 

@@ -1,10 +1,14 @@
-//! Detection exception lists and items. `Single` is scoped to a Kibana space;
-//! `Agnostic` lists are shared across spaces. Referenced value-list contents are
-//! managed separately and are not included in exception exports.
-use crate::{Client, Result, Scope};
-use reqwest::{Method, Response, multipart};
+//! Detection exception lists and items. `Single` lists are scoped to a Kibana
+//! space; `Agnostic` lists are shared across spaces. Referenced value-list
+//! contents are managed separately and are not included in exception exports.
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+
+use crate::{
+    Kibana, Scope, SortOrder,
+    http::{Method, Raw},
+    request::endpoint,
+};
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -14,15 +18,27 @@ pub enum NamespaceType {
     Agnostic,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+impl NamespaceType {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Single => "single",
+            Self::Agnostic => "agnostic",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
+#[non_exhaustive]
 pub enum OsType {
     Linux,
     Macos,
     Windows,
 }
 
+/// Identifies a list for rule associations and exports.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct ListReference {
     pub id: String,
     pub list_id: String,
@@ -31,7 +47,24 @@ pub struct ListReference {
     pub list_type: String,
 }
 
+impl ListReference {
+    pub fn new(
+        id: impl Into<String>,
+        list_id: impl Into<String>,
+        namespace_type: NamespaceType,
+        list_type: impl Into<String>,
+    ) -> Self {
+        Self {
+            id: id.into(),
+            list_id: list_id.into(),
+            namespace_type,
+            list_type: list_type.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct ExceptionList {
     pub id: String,
     pub list_id: String,
@@ -49,57 +82,90 @@ pub struct ExceptionList {
 
 impl ExceptionList {
     pub fn reference(&self) -> ListReference {
-        ListReference {
-            id: self.id.clone(),
-            list_id: self.list_id.clone(),
-            namespace_type: self.namespace_type,
-            list_type: self.list_type.clone(),
-        }
+        ListReference::new(
+            &self.id,
+            &self.list_id,
+            self.namespace_type,
+            &self.list_type,
+        )
     }
 }
 
+/// A list definition for [`Exceptions::create_list`] and [`Exceptions::update_list`].
 #[derive(Clone, Debug, Serialize)]
 pub struct NewList {
-    pub name: String,
-    pub description: String,
+    name: String,
+    description: String,
     #[serde(rename = "type")]
-    pub list_type: String,
-    pub namespace_type: NamespaceType,
+    list_type: String,
+    namespace_type: NamespaceType,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub list_id: Option<String>,
-    pub tags: Vec<String>,
+    list_id: Option<String>,
+    tags: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub os_types: Vec<OsType>,
+    os_types: Vec<OsType>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub version: Option<u64>,
+    version: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Map<String, Value>>,
+    meta: Option<Map<String, Value>>,
 }
 
 impl NewList {
-    pub fn detection(name: impl Into<String>, description: impl Into<String>) -> Self {
+    /// `list_type` is `detection`, `rule_default` or an Endpoint artifact type.
+    pub fn new(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        list_type: impl Into<String>,
+    ) -> Self {
         Self {
             name: name.into(),
             description: description.into(),
-            list_type: "detection".into(),
+            list_type: list_type.into(),
             namespace_type: NamespaceType::Single,
             list_id: None,
-            tags: vec![],
-            os_types: vec![],
+            tags: Vec::new(),
+            os_types: Vec::new(),
             version: None,
             meta: None,
         }
     }
-}
 
-/// Replaces the list's editable fields. Supply the last read `_version`.
-#[derive(Debug, Serialize)]
-pub struct UpdateList<'a> {
-    pub id: &'a str,
-    #[serde(rename = "_version")]
-    pub revision: &'a str,
-    #[serde(flatten)]
-    pub definition: &'a NewList,
+    /// A shared detection list in the current space.
+    pub fn detection(name: impl Into<String>, description: impl Into<String>) -> Self {
+        Self::new(name, description, "detection")
+    }
+
+    pub fn namespace_type(mut self, namespace: NamespaceType) -> Self {
+        self.namespace_type = namespace;
+        self
+    }
+
+    /// A stable human-readable identifier, generated by Kibana when omitted.
+    pub fn list_id(mut self, list_id: impl Into<String>) -> Self {
+        self.list_id = Some(list_id.into());
+        self
+    }
+
+    pub fn tags<I: IntoIterator<Item = S>, S: Into<String>>(mut self, tags: I) -> Self {
+        self.tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn os_types(mut self, os_types: Vec<OsType>) -> Self {
+        self.os_types = os_types;
+        self
+    }
+
+    /// A user-defined version number, unrelated to the concurrency token.
+    pub fn version(mut self, version: u64) -> Self {
+        self.version = Some(version);
+        self
+    }
+
+    pub fn meta(mut self, meta: Map<String, Value>) -> Self {
+        self.meta = Some(meta);
+        self
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -132,16 +198,17 @@ impl<'a> ItemSelector<'a> {
     }
 }
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum Operator {
     Included,
     Excluded,
 }
 
-/// Nested entries support match, match_any and exists, not recursive nesting.
+/// Conditions inside [`Entry::Nested`]. Nesting is one level deep.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum NestedEntry {
     Match {
         field: String,
@@ -159,15 +226,28 @@ pub enum NestedEntry {
     },
 }
 
+/// A value list referenced by [`Entry::List`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
+#[non_exhaustive]
 pub struct ValueListReference {
     pub id: String,
+    /// The value type, such as `ip`, `keyword` or `text`.
     #[serde(rename = "type")]
     pub list_type: String,
 }
 
+impl ValueListReference {
+    pub fn new(id: impl Into<String>, list_type: impl Into<String>) -> Self {
+        Self {
+            id: id.into(),
+            list_type: list_type.into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[non_exhaustive]
 pub enum Entry {
     Match {
         field: String,
@@ -201,33 +281,50 @@ pub enum Entry {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct Comment {
-    pub comment: String,
+    comment: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+    id: Option<String>,
 }
 
+impl Comment {
+    pub fn new(comment: impl Into<String>) -> Self {
+        Self {
+            comment: comment.into(),
+            id: None,
+        }
+    }
+
+    /// Keeps an existing comment when replacing an item.
+    pub fn id(mut self, id: impl Into<String>) -> Self {
+        self.id = Some(id.into());
+        self
+    }
+}
+
+/// An item definition for [`Exceptions::create_item`] and [`Exceptions::update_item`].
 #[derive(Clone, Debug, Serialize)]
 pub struct NewItem {
-    pub name: String,
-    pub description: String,
-    pub list_id: String,
+    name: String,
+    description: String,
+    list_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub item_id: Option<String>,
+    item_id: Option<String>,
     #[serde(rename = "type")]
     item_type: &'static str,
-    pub namespace_type: NamespaceType,
-    pub entries: Vec<Entry>,
-    pub tags: Vec<String>,
+    namespace_type: NamespaceType,
+    entries: Vec<Entry>,
+    tags: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub os_types: Vec<OsType>,
-    pub comments: Vec<Comment>,
+    os_types: Vec<OsType>,
+    comments: Vec<Comment>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub expire_time: Option<String>,
+    expire_time: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub meta: Option<Map<String, Value>>,
+    meta: Option<Map<String, Value>>,
 }
 
 impl NewItem {
+    /// An item in `list`. Its entries are combined with AND.
     pub fn new(list: &ExceptionList, name: impl Into<String>, entries: Vec<Entry>) -> Self {
         Self {
             name: name.into(),
@@ -237,26 +334,54 @@ impl NewItem {
             item_type: "simple",
             namespace_type: list.namespace_type,
             entries,
-            tags: vec![],
-            os_types: vec![],
-            comments: vec![],
+            tags: Vec::new(),
+            os_types: Vec::new(),
+            comments: Vec::new(),
             expire_time: None,
             meta: None,
         }
     }
-}
 
-/// Replaces the item's editable fields. Omitted fields may be reset by Kibana.
-#[derive(Debug, Serialize)]
-pub struct UpdateItem<'a> {
-    pub id: &'a str,
-    #[serde(rename = "_version")]
-    pub revision: &'a str,
-    #[serde(flatten)]
-    pub definition: &'a NewItem,
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into();
+        self
+    }
+
+    /// A stable human-readable identifier, generated by Kibana when omitted.
+    pub fn item_id(mut self, item_id: impl Into<String>) -> Self {
+        self.item_id = Some(item_id.into());
+        self
+    }
+
+    pub fn tags<I: IntoIterator<Item = S>, S: Into<String>>(mut self, tags: I) -> Self {
+        self.tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn os_types(mut self, os_types: Vec<OsType>) -> Self {
+        self.os_types = os_types;
+        self
+    }
+
+    pub fn comments(mut self, comments: Vec<Comment>) -> Self {
+        self.comments = comments;
+        self
+    }
+
+    /// An ISO 8601 time after which the item no longer applies.
+    pub fn expire_time(mut self, time: impl Into<String>) -> Self {
+        self.expire_time = Some(time.into());
+        self
+    }
+
+    pub fn meta(mut self, meta: Map<String, Value>) -> Self {
+        self.meta = Some(meta);
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct ExceptionItem {
     pub id: String,
     pub item_id: String,
@@ -264,6 +389,7 @@ pub struct ExceptionItem {
     pub name: String,
     pub description: String,
     pub namespace_type: NamespaceType,
+    /// Opaque concurrency token required by [`Exceptions::update_item`].
     #[serde(rename = "_version", default)]
     pub revision: Option<String>,
     /// JSON preserves entry variants added by newer deployments.
@@ -272,31 +398,8 @@ pub struct ExceptionItem {
     pub extra: Map<String, Value>,
 }
 
-#[derive(Clone, Debug, Serialize)]
-pub struct FindOptions {
-    pub page: u32,
-    pub per_page: u32,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub filter: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sort_field: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sort_order: Option<String>,
-}
-
-impl Default for FindOptions {
-    fn default() -> Self {
-        Self {
-            page: 1,
-            per_page: 50,
-            filter: None,
-            sort_field: None,
-            sort_order: None,
-        }
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct ExceptionPage<T> {
     pub data: Vec<T>,
     pub page: u32,
@@ -308,6 +411,7 @@ pub struct ExceptionPage<T> {
 
 /// HTTP 200 can contain failed list or item imports; inspect `success` and `errors`.
 #[derive(Clone, Debug, Deserialize, Serialize)]
+#[non_exhaustive]
 pub struct ImportResult {
     pub success: bool,
     pub success_count: u64,
@@ -316,251 +420,334 @@ pub struct ImportResult {
     pub extra: Map<String, Value>,
 }
 
-pub struct Exceptions<'a>(pub(crate) &'a Client);
+#[derive(Clone, Copy, Debug)]
+pub struct Exceptions<'a>(pub(crate) &'a Kibana);
 
-impl Exceptions<'_> {
-    pub async fn create_list(&self, list: &NewList) -> Result<ExceptionList> {
-        self.0
-            .json(
-                self.0
-                    .request(Method::POST, Scope::Space, &["api", "exception_lists"])?
-                    .json(list),
-            )
-            .await
+impl<'a> Exceptions<'a> {
+    /// Creates a list from a [`NewList`] or equivalent JSON.
+    pub fn create_list<B: Serialize + ?Sized>(&self, list: &B) -> CreateList<'a> {
+        CreateList(
+            self.0
+                .request(Method::POST, Scope::Space, &["api", "exception_lists"])
+                .json(list),
+        )
     }
 
-    pub async fn list(
+    pub fn get_list(&self, list: ListSelector<'_>) -> GetList<'a> {
+        GetList(
+            self.0
+                .request(Method::GET, Scope::Space, &["api", "exception_lists"])
+                .query(&[list.pair()]),
+        )
+    }
+
+    /// Replaces the editable fields of list `id`. `revision` is the `_version`
+    /// from the last read; a stale value fails with HTTP 409.
+    pub fn update_list<B: Serialize + ?Sized>(
         &self,
-        selector: ListSelector<'_>,
-        namespace: NamespaceType,
-    ) -> Result<ExceptionList> {
-        self.0
-            .json(
-                self.0
-                    .request(Method::GET, Scope::Space, &["api", "exception_lists"])?
-                    .query(&[selector.pair()])
-                    .query(&[("namespace_type", namespace)]),
-            )
-            .await
-    }
-
-    pub async fn update_list(&self, list: &UpdateList<'_>) -> Result<ExceptionList> {
-        self.0
-            .json(
-                self.0
-                    .request(Method::PUT, Scope::Space, &["api", "exception_lists"])?
-                    .json(list),
-            )
-            .await
+        id: &str,
+        revision: &str,
+        list: &B,
+    ) -> UpdateList<'a> {
+        UpdateList(
+            self.0
+                .request(Method::PUT, Scope::Space, &["api", "exception_lists"])
+                .json(list)
+                .field("id", id)
+                .field("_version", revision),
+        )
     }
 
     /// Deletes the list and its items. Detach it from rules first.
-    pub async fn delete_list(
+    pub fn delete_list(&self, list: ListSelector<'_>) -> DeleteList<'a> {
+        DeleteList(
+            self.0
+                .request(Method::DELETE, Scope::Space, &["api", "exception_lists"])
+                .query(&[list.pair()]),
+        )
+    }
+
+    pub fn find_lists(&self) -> FindLists<'a> {
+        FindLists(self.0.request(
+            Method::GET,
+            Scope::Space,
+            &["api", "exception_lists", "_find"],
+        ))
+    }
+
+    /// Creates an item from a [`NewItem`] or equivalent JSON.
+    pub fn create_item<B: Serialize + ?Sized>(&self, item: &B) -> CreateItem<'a> {
+        CreateItem(
+            self.0
+                .request(
+                    Method::POST,
+                    Scope::Space,
+                    &["api", "exception_lists", "items"],
+                )
+                .json(item),
+        )
+    }
+
+    pub fn get_item(&self, item: ItemSelector<'_>) -> GetItem<'a> {
+        GetItem(
+            self.0
+                .request(
+                    Method::GET,
+                    Scope::Space,
+                    &["api", "exception_lists", "items"],
+                )
+                .query(&[item.pair()]),
+        )
+    }
+
+    /// Replaces the editable fields of item `id`. Omitted fields may be reset by Kibana.
+    pub fn update_item<B: Serialize + ?Sized>(
         &self,
-        selector: ListSelector<'_>,
-        namespace: NamespaceType,
-    ) -> Result<ExceptionList> {
-        self.0
-            .json(
-                self.0
-                    .request(Method::DELETE, Scope::Space, &["api", "exception_lists"])?
-                    .query(&[selector.pair()])
-                    .query(&[("namespace_type", namespace)]),
-            )
-            .await
+        id: &str,
+        revision: &str,
+        item: &B,
+    ) -> UpdateItem<'a> {
+        UpdateItem(
+            self.0
+                .request(
+                    Method::PUT,
+                    Scope::Space,
+                    &["api", "exception_lists", "items"],
+                )
+                .json(item)
+                .field("id", id)
+                .field("_version", revision),
+        )
     }
 
-    pub async fn lists(
-        &self,
-        namespace: NamespaceType,
-        options: &FindOptions,
-    ) -> Result<ExceptionPage<ExceptionList>> {
-        self.0
-            .json(
-                self.0
-                    .request(
-                        Method::GET,
-                        Scope::Space,
-                        &["api", "exception_lists", "_find"],
-                    )?
-                    .query(&[("namespace_type", namespace)])
-                    .query(options),
-            )
-            .await
+    pub fn delete_item(&self, item: ItemSelector<'_>) -> DeleteItem<'a> {
+        DeleteItem(
+            self.0
+                .request(
+                    Method::DELETE,
+                    Scope::Space,
+                    &["api", "exception_lists", "items"],
+                )
+                .query(&[item.pair()]),
+        )
     }
 
-    pub async fn create_item(&self, item: &NewItem) -> Result<ExceptionItem> {
-        self.0
-            .json(
-                self.0
-                    .request(
-                        Method::POST,
-                        Scope::Space,
-                        &["api", "exception_lists", "items"],
-                    )?
-                    .json(item),
-            )
-            .await
+    /// One page of items from one list.
+    ///
+    /// Kibana splits list IDs and filters on commas after URL decoding, so
+    /// literal commas in these values are not supported.
+    pub fn find_items(&self, list_id: &str) -> FindItems<'a> {
+        FindItems(
+            self.0
+                .request(
+                    Method::GET,
+                    Scope::Space,
+                    &["api", "exception_lists", "items", "_find"],
+                )
+                .param("list_id", list_id),
+        )
     }
 
-    pub async fn item(
-        &self,
-        selector: ItemSelector<'_>,
-        namespace: NamespaceType,
-    ) -> Result<ExceptionItem> {
-        self.0
-            .json(
-                self.0
-                    .request(
-                        Method::GET,
-                        Scope::Space,
-                        &["api", "exception_lists", "items"],
-                    )?
-                    .query(&[selector.pair()])
-                    .query(&[("namespace_type", namespace)]),
-            )
-            .await
+    /// Item counts per operating system. Lists without OS-tagged items can report
+    /// `total: 0`; use [`find_items`](Self::find_items) for the item count.
+    pub fn summary(&self, list: ListSelector<'_>) -> Summary<'a> {
+        Summary(
+            self.0
+                .request(
+                    Method::GET,
+                    Scope::Space,
+                    &["api", "exception_lists", "summary"],
+                )
+                .query(&[list.pair()]),
+        )
     }
 
-    pub async fn update_item(&self, item: &UpdateItem<'_>) -> Result<ExceptionItem> {
-        self.0
-            .json(
-                self.0
-                    .request(
-                        Method::PUT,
-                        Scope::Space,
-                        &["api", "exception_lists", "items"],
-                    )?
-                    .json(item),
-            )
-            .await
-    }
-
-    pub async fn delete_item(
-        &self,
-        selector: ItemSelector<'_>,
-        namespace: NamespaceType,
-    ) -> Result<ExceptionItem> {
-        self.0
-            .json(
-                self.0
-                    .request(
-                        Method::DELETE,
-                        Scope::Space,
-                        &["api", "exception_lists", "items"],
-                    )?
-                    .query(&[selector.pair()])
-                    .query(&[("namespace_type", namespace)]),
-            )
-            .await
-    }
-
-    /// Retrieves one page for one list. The upstream multi-list search is not exposed.
-    /// Kibana splits scalar list IDs and filters on commas after URL decoding;
-    /// literal commas in these values are not supported by this method.
-    pub async fn items(
-        &self,
-        list_id: &str,
-        namespace: NamespaceType,
-        options: &FindOptions,
-    ) -> Result<ExceptionPage<ExceptionItem>> {
-        self.0
-            .json(
-                self.0
-                    .request(
-                        Method::GET,
-                        Scope::Space,
-                        &["api", "exception_lists", "items", "_find"],
-                    )?
-                    .query(&[("list_id", list_id)])
-                    .query(&[("namespace_type", namespace)])
-                    .query(options),
-            )
-            .await
-    }
-
-    /// OS counts from Kibana. Lists with no OS-tagged items can report total=0;
-    /// use `items().total` for the unfiltered item count.
-    pub async fn summary(
-        &self,
-        selector: ListSelector<'_>,
-        namespace: NamespaceType,
-    ) -> Result<Value> {
-        self.0
-            .json(
-                self.0
-                    .request(
-                        Method::GET,
-                        Scope::Space,
-                        &["api", "exception_lists", "summary"],
-                    )?
-                    .query(&[selector.pair()])
-                    .query(&[("namespace_type", namespace)]),
-            )
-            .await
-    }
-
-    pub async fn duplicate_list(
+    pub fn duplicate_list(
         &self,
         list_id: &str,
         namespace: NamespaceType,
         include_expired: bool,
-    ) -> Result<ExceptionList> {
-        self.0
-            .json(
-                self.0
-                    .request(
-                        Method::POST,
-                        Scope::Space,
-                        &["api", "exception_lists", "_duplicate"],
-                    )?
-                    .query(&[("list_id", list_id)])
-                    .query(&[("namespace_type", namespace)])
-                    .query(&[("include_expired_exceptions", include_expired)]),
-            )
-            .await
+    ) -> DuplicateList<'a> {
+        DuplicateList(
+            self.0
+                .request(
+                    Method::POST,
+                    Scope::Space,
+                    &["api", "exception_lists", "_duplicate"],
+                )
+                .param("list_id", list_id)
+                .param("namespace_type", namespace.as_str())
+                .param("include_expired_exceptions", include_expired),
+        )
     }
 
-    pub async fn export_list(
-        &self,
-        list: &ListReference,
-        include_expired: bool,
-    ) -> Result<Response> {
-        self.0
-            .execute(
-                self.0
-                    .request(
-                        Method::POST,
-                        Scope::Space,
-                        &["api", "exception_lists", "_export"],
-                    )?
-                    .query(&[("id", &list.id), ("list_id", &list.list_id)])
-                    .query(&[("namespace_type", list.namespace_type)])
-                    .query(&[("include_expired_exceptions", include_expired)]),
-            )
-            .await
+    /// Exports the list and its items as NDJSON.
+    pub fn export_list(&self, list: &ListReference, include_expired: bool) -> ExportList<'a> {
+        ExportList(
+            self.0
+                .request(
+                    Method::POST,
+                    Scope::Space,
+                    &["api", "exception_lists", "_export"],
+                )
+                .param("id", &list.id)
+                .param("list_id", &list.list_id)
+                .param("namespace_type", list.namespace_type.as_str())
+                .param("include_expired_exceptions", include_expired),
+        )
     }
 
-    pub async fn import_lists(
-        &self,
-        ndjson: Vec<u8>,
-        overwrite: bool,
-        as_new_list: bool,
-    ) -> Result<ImportResult> {
-        let file = multipart::Part::bytes(ndjson)
-            .file_name("exceptions.ndjson")
-            .mime_str("application/ndjson")?;
-        self.0
-            .json(
-                self.0
-                    .request(
-                        Method::POST,
-                        Scope::Space,
-                        &["api", "exception_lists", "_import"],
-                    )?
-                    .query(&[("overwrite", overwrite), ("as_new_list", as_new_list)])
-                    .multipart(multipart::Form::new().part("file", file)),
-            )
-            .await
+    /// Imports NDJSON lists and items. Partial failures are reported with HTTP 200.
+    /// Imports can regenerate saved-object IDs; read back by `list_id` afterwards.
+    pub fn import_lists(&self, ndjson: impl Into<Vec<u8>>) -> ImportLists<'a> {
+        ImportLists(
+            self.0
+                .request(
+                    Method::POST,
+                    Scope::Space,
+                    &["api", "exception_lists", "_import"],
+                )
+                .file("exceptions.ndjson", "application/ndjson", ndjson.into()),
+        )
     }
 }
+
+macro_rules! namespace_setter {
+    ($($name:ident),*) => {$(
+        impl $name<'_> {
+            /// Defaults to [`NamespaceType::Single`] on the server.
+            pub fn namespace_type(self, namespace: NamespaceType) -> Self {
+                Self(self.0.param("namespace_type", namespace.as_str()))
+            }
+        }
+    )*};
+}
+
+macro_rules! find_setters {
+    ($($name:ident),*) => {$(
+        impl $name<'_> {
+            /// One-based page number.
+            pub fn page(self, page: u32) -> Self {
+                Self(self.0.param("page", page))
+            }
+
+            pub fn per_page(self, per_page: u32) -> Self {
+                Self(self.0.param("per_page", per_page))
+            }
+
+            /// A KQL filter over list or item attributes.
+            pub fn filter(self, filter: &str) -> Self {
+                Self(self.0.param("filter", filter))
+            }
+
+            pub fn sort_field(self, field: &str) -> Self {
+                Self(self.0.param("sort_field", field))
+            }
+
+            pub fn sort_order(self, order: SortOrder) -> Self {
+                Self(self.0.param("sort_order", order.as_str()))
+            }
+        }
+    )*};
+}
+
+endpoint! {
+    /// `POST /api/exception_lists`
+    CreateList => ExceptionList
+}
+
+endpoint! {
+    /// `GET /api/exception_lists`
+    GetList => ExceptionList
+}
+
+endpoint! {
+    /// `PUT /api/exception_lists`
+    UpdateList => ExceptionList
+}
+
+endpoint! {
+    /// `DELETE /api/exception_lists`
+    DeleteList => ExceptionList
+}
+
+endpoint! {
+    /// `GET /api/exception_lists/_find`
+    FindLists => ExceptionPage<ExceptionList>
+}
+
+endpoint! {
+    /// `POST /api/exception_lists/items`
+    CreateItem => ExceptionItem
+}
+
+endpoint! {
+    /// `GET /api/exception_lists/items`
+    GetItem => ExceptionItem
+}
+
+endpoint! {
+    /// `PUT /api/exception_lists/items`
+    UpdateItem => ExceptionItem
+}
+
+endpoint! {
+    /// `DELETE /api/exception_lists/items`
+    DeleteItem => ExceptionItem
+}
+
+endpoint! {
+    /// `GET /api/exception_lists/items/_find`
+    FindItems => ExceptionPage<ExceptionItem>
+}
+
+impl FindItems<'_> {
+    /// Free-text search over item fields.
+    pub fn search(self, text: &str) -> Self {
+        Self(self.0.param("search", text))
+    }
+}
+
+endpoint! {
+    /// `GET /api/exception_lists/summary`
+    Summary => Value
+}
+
+impl Summary<'_> {
+    /// A KQL filter applied before counting.
+    pub fn filter(self, filter: &str) -> Self {
+        Self(self.0.param("filter", filter))
+    }
+}
+
+endpoint! {
+    /// `POST /api/exception_lists/_duplicate`
+    DuplicateList => ExceptionList
+}
+
+endpoint! {
+    /// `POST /api/exception_lists/_export`
+    ExportList => Raw
+}
+
+endpoint! {
+    /// `POST /api/exception_lists/_import`
+    ImportLists => ImportResult
+}
+
+impl ImportLists<'_> {
+    /// Replaces existing lists and items with the same IDs.
+    pub fn overwrite(self, overwrite: bool) -> Self {
+        Self(self.0.param("overwrite", overwrite))
+    }
+
+    /// Imports under newly generated list IDs.
+    pub fn as_new_list(self, enabled: bool) -> Self {
+        Self(self.0.param("as_new_list", enabled))
+    }
+}
+
+namespace_setter!(
+    GetList, DeleteList, FindLists, GetItem, DeleteItem, FindItems, Summary
+);
+find_setters!(FindLists, FindItems);

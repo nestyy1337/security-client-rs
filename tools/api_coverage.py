@@ -16,7 +16,16 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 VERBS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
-TRANSPORT_HELPERS = {"client.execute", "client.json"}
+# `&self` methods that are not endpoints: client accessors and value helpers.
+NON_ENDPOINTS = {
+    "client.cases", "client.default_space", "client.exceptions", "client.fleet", "client.request",
+    "client.roles", "client.security", "client.space", "client.space_id", "client.spaces", "client.transport",
+    "exceptions.reference",
+}
+# Modules without endpoints.
+NON_ENDPOINT_MODULES = {"error.rs", "lib.rs", "request.rs"}
+# Live suites need a deployment; wire tests must run offline in every CI job.
+LIVE_TESTS = {"live.rs", "deployment.rs"}
 
 
 def require(condition, message):
@@ -46,17 +55,24 @@ def inventory(spec):
 
 
 def wrappers(root):
-    """Recognize the crate's direct request convention; fail on unknown shapes."""
+    """Recognize the builder convention; fail on unknown shapes.
+
+    Every endpoint is a namespace method taking `&self` whose body builds exactly
+    one `.request(Method::X, Scope::Y, &[...])`. Builder setters take `self`.
+    """
     result = {}
     pattern = r"\.request\(\s*Method::(\w+),\s*Scope::(\w+),\s*&\[([^\]]+)\]"
     for source in sorted((root / "src").glob("*.rs")):
+        if source.name in NON_ENDPOINT_MODULES:
+            continue
         code = source.read_text()
-        functions = list(re.finditer(r"pub async fn (\w+)", code))
-        for i, function in enumerate(functions):
+        functions = list(re.finditer(r"pub fn (\w+)\b[^(]*\(\s*&self", code))
+        for function in functions:
             name = f"{source.stem}.{function[1]}"
-            if name in TRANSPORT_HELPERS:
+            if name in NON_ENDPOINTS:
                 continue
-            end = functions[i + 1].start() if i + 1 < len(functions) else len(code)
+            following = re.compile(r"\bfn\s+\w+").search(code, function.end())
+            end = following.start() if following else len(code)
             calls = list(re.finditer(pattern, code[function.start():end]))
             require(len(calls) == 1, f"Review route extraction for {name}: expected one direct request")
             method, scope, segments = calls[0].groups()
@@ -67,6 +83,20 @@ def wrappers(root):
             require(name not in result, f"Duplicate wrapper: {name}")
             result[name] = (method, path, scope)
     return result
+
+
+def untested(root, names):
+    """Named wrappers never called through their namespace in an offline test."""
+    code = "\n".join(
+        path.read_text() for path in sorted((root / "tests").glob("*.rs")) if path.name not in LIVE_TESTS
+    )
+    missing = []
+    for name in sorted(names):
+        namespace, method = name.split(".")
+        call = rf"\.{method}\(" if namespace == "client" else rf"\.{namespace}\(\)\s*\.{method}\("
+        if not re.search(call, code):
+            missing.append(name)
+    return missing
 
 
 def fingerprint(root, files):
@@ -99,6 +129,8 @@ def validate(root, metadata, operations, rows):
     require(len(rows) == len({r["wrapper"] for r in rows}), "Duplicate wrapper entries")
     names = {r["wrapper"] for r in rows}
     require(names == set(actual), f"Wrapper inventory differs: {sorted(names ^ set(actual))}")
+    missing_tests = untested(root, names)
+    require(not missing_tests, f"Wrappers without an offline wire test: {missing_tests}")
     seen = set()
     for row in rows:
         key = (row["method"], canonical(row["path"]))
@@ -145,6 +177,7 @@ def report(root, metadata, operations, rows):
         f"| **Total** | **{len(operations)}** | **{len(rows)}** | **{sum(recorded.values())}** | **{len(operations) - len(rows)}** |", "",
         "## What these numbers mean", "",
         "- A named wrapper is a method/path mapping. Generic raw requests do not count as coverage.",
+        "- Every named wrapper is called by an offline wire-contract test in `tests/`, which asserts its method, path, query and body against a recording mock. The checker fails otherwise. Wire tests check this client's requests, not Kibana's behavior.",
         "- `partial` means a known request or response limitation. `unreviewed` means full contract parity has not been audited. Neither means complete support.",
         f"- The denominator includes {sum(bool(op.get('deprecated')) for op in operations.values())} deprecated operations, documentation placeholders, and {sum('/internal/' in op['path'] for op in operations.values())} explicit internal route. It is the published bundle inventory, not a list of guaranteed stable public contracts.",
         "- Parameter names are normalized for matching. Explicit `/s/{spaceId}` paths remain distinct. Space-routing behavior must be tested separately.",

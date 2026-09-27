@@ -22,6 +22,7 @@ SHA-256: `a5dd0f2a0fa30f2bdcba6b42c712b9bfcd89f22aef29c9bf5285328f014279d9`.
 ## What these numbers mean
 
 - A named wrapper is a method/path mapping. Generic raw requests do not count as coverage.
+- Every named wrapper is called by an offline wire-contract test in `tests/`, which asserts its method, path, query and body against a recording mock. The checker fails otherwise. Wire tests check this client's requests, not Kibana's behavior.
 - `partial` means a known request or response limitation. `unreviewed` means full contract parity has not been audited. Neither means complete support.
 - The denominator includes 40 deprecated operations, documentation placeholders, and 1 explicit internal route. It is the published bundle inventory, not a list of guaranteed stable public contracts.
 - Parameter names are normalized for matching. Explicit `/s/{spaceId}` paths remain distinct. Space-routing behavior must be tested separately.
@@ -43,13 +44,13 @@ The historical run exercised 44 operations through live tests and status through
 
 | Rust operation | Official operation ID | HTTP route | Contract | Evidence | Limits |
 | --- | --- | --- | --- | --- | --- |
-| `cases.comment` | `addCaseCommentDefaultSpace` | `POST /api/cases/{caseId}/comments` | partial | live-cases | User-text comments only, no alert attachments. |
-| `cases.comments` | `findCaseCommentsDefaultSpace` | `GET /api/cases/{caseId}/comments/_find` | partial | live-cases | Page and page size only; response remains JSON. |
-| `cases.create` | `createCaseDefaultSpace` | `POST /api/cases` | partial | live-cases | Basic case fields, connector and syncAlerts; no assignee or custom-field creation type. |
+| `cases.add_comment` | `addCaseCommentDefaultSpace` | `POST /api/cases/{caseId}/comments` | partial | live-cases | Typed free-text comments; alert and other attachments only as caller-supplied JSON. Returns the updated case. |
+| `cases.create` | `createCaseDefaultSpace` | `POST /api/cases` | partial | live-cases | Typed severity, tags, connector and syncAlerts; assignees, category and custom fields only as caller-supplied JSON. |
 | `cases.delete` | `deleteCaseDefaultSpace` | `DELETE /api/cases` | unreviewed | live-cases | ID-list deletion; no full contract audit. |
-| `cases.find` | `findCasesDefaultSpace` | `GET /api/cases/_find` | partial | live-cases | Page, page size, owner and search only. |
+| `cases.find` | `findCasesDefaultSpace` | `GET /api/cases/_find` | partial | live-cases | Page, page size, owners, search, status, severity, tags and sorting; no assignee, reporter, category or date-range filters. |
+| `cases.find_comments` | `findCaseCommentsDefaultSpace` | `GET /api/cases/{caseId}/comments/_find` | partial | live-cases | Page, page size and sort order; comments remain JSON. |
 | `cases.get` | `getCaseDefaultSpace` | `GET /api/cases/{caseId}` | unreviewed | live-cases | Core case fields and extensible JSON response. |
-| `cases.update` | `updateCaseDefaultSpace` | `PATCH /api/cases` | partial | live-cases | Versioned title, status and severity patches only. |
+| `cases.update` | `updateCaseDefaultSpace` | `PATCH /api/cases` | partial | live-cases | Versioned status, title, description, severity and tag patches; other fields not modeled. |
 | `client.status` | `get-status` | `GET /api/status` | unreviewed | browser | JSON status response; completeness not audited. |
 | `exceptions.create_item` | `CreateExceptionListItem` | `POST /api/exception_lists/items` | partial | - | Typed match, match_any, exists, wildcard, value-list reference and nested entries, plus OS types; Endpoint artifact validation deferred. |
 | `exceptions.create_list` | `CreateExceptionList` | `POST /api/exception_lists` | partial | - | Detection list fields, OS types and user-defined version; Endpoint artifact constraints not validated by the client. |
@@ -57,70 +58,70 @@ The historical run exercised 44 operations through live tests and status through
 | `exceptions.delete_list` | `DeleteExceptionList` | `DELETE /api/exception_lists` | unreviewed | - | Core fields and extensible response; full contract parity not audited. |
 | `exceptions.duplicate_list` | `DuplicateExceptionList` | `POST /api/exception_lists/_duplicate` | partial | - | List ID, namespace and expired-item selection; response retains extra fields. |
 | `exceptions.export_list` | `ExportExceptionList` | `POST /api/exception_lists/_export` | partial | - | Streaming NDJSON with namespace and expired-item selection. Value-list contents excluded. |
+| `exceptions.find_items` | `FindExceptionListItems` | `GET /api/exception_lists/items/_find` | partial | - | One list per call; pagination, filter, search and sorting, no multi-list option. Upstream scalar parsing does not support literal commas in list IDs/filters. |
+| `exceptions.find_lists` | `FindExceptionLists` | `GET /api/exception_lists/_find` | partial | - | Namespace, explicit pagination, filter and sorting. |
+| `exceptions.get_item` | `ReadExceptionListItem` | `GET /api/exception_lists/items` | unreviewed | - | Core fields and extensible response; full contract parity not audited. |
+| `exceptions.get_list` | `ReadExceptionList` | `GET /api/exception_lists` | unreviewed | - | Core fields and extensible response; full contract parity not audited. |
 | `exceptions.import_lists` | `ImportExceptionList` | `POST /api/exception_lists/_import` | partial | - | Multipart NDJSON with overwrite/as_new_list options; preserves HTTP-200 partial failures. Value-list contents excluded. |
-| `exceptions.item` | `ReadExceptionListItem` | `GET /api/exception_lists/items` | unreviewed | - | Core fields and extensible response; full contract parity not audited. |
-| `exceptions.items` | `FindExceptionListItems` | `GET /api/exception_lists/items/_find` | partial | - | One list and namespace per call; pagination/filter/sorting, no multi-list or search option. Upstream scalar parsing does not support literal commas in list IDs/filters. |
-| `exceptions.list` | `ReadExceptionList` | `GET /api/exception_lists` | unreviewed | - | Core fields and extensible response; full contract parity not audited. |
-| `exceptions.lists` | `FindExceptionLists` | `GET /api/exception_lists/_find` | partial | - | One namespace per call; explicit pagination, filter and sorting. |
-| `exceptions.summary` | `ReadExceptionListSummary` | `GET /api/exception_lists/summary` | partial | - | JSON OS summary; optional filter not exposed. Upstream can report total=0 when no items have os_types; use items().total for item counts. |
+| `exceptions.summary` | `ReadExceptionListSummary` | `GET /api/exception_lists/summary` | partial | - | JSON OS summary with optional filter. Upstream can report total=0 when no items have os_types; use find_items().total for item counts. |
 | `exceptions.update_item` | `UpdateExceptionListItem` | `PUT /api/exception_lists/items` | partial | - | Explicit optimistic concurrency token; replaces modeled fields. Endpoint artifact validation deferred. |
 | `exceptions.update_list` | `UpdateExceptionList` | `PUT /api/exception_lists` | partial | - | Explicit optimistic concurrency token; replaces modeled fields, not a patch. |
-| `fleet.agent` | `get-fleet-agents-agentid` | `GET /api/fleet/agents/{agentId}` | unreviewed | - | Core fields plus extensible JSON; real-agent state and policy acknowledgment are exercised by deployment tests. |
-| `fleet.agent_actions` | `get-fleet-agents-action-status` | `GET /api/fleet/agents/action_status` | partial | - | Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. No automatic polling. |
-| `fleet.agent_policies` | `get-fleet-agent-policies` | `GET /api/fleet/agent_policies` | partial | live-fleet | Page, page size and kuery; requests full policies and agent counts. |
-| `fleet.agent_policy` | `get-fleet-agent-policies-agentpolicyid` | `GET /api/fleet/agent_policies/{agentPolicyId}` | unreviewed | live-fleet | Core policy fields plus extensible JSON. |
+| `fleet.agent_action_status` | `get-fleet-agents-action-status` | `GET /api/fleet/agents/action_status` | partial | - | Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. No automatic polling. |
 | `fleet.agent_status` | `get-fleet-agent-status` | `GET /api/fleet/agent_status` | unreviewed | live-fleet | JSON status summary; historical operation-level evidence used an empty fleet. |
-| `fleet.agent_uploads` | `get-fleet-agents-agentid-uploads` | `GET /api/fleet/agents/{agentId}/uploads` | partial | - | Typed status, action ID and file metadata; caller correlates readiness before download. |
-| `fleet.agents` | `get-fleet-agents` | `GET /api/fleet/agents` | partial | live-fleet | Page, page size and kuery only; historical operation-level evidence used an empty fleet. |
-| `fleet.bulk_reassign_agents` | `post-fleet-agents-bulk-reassign` | `POST /api/fleet/agents/bulk_reassign` | unreviewed | - | Core fields and extensible response; full contract parity not audited. |
+| `fleet.bulk_reassign_agents` | `post-fleet-agents-bulk-reassign` | `POST /api/fleet/agents/bulk_reassign` | unreviewed | - | ID/KQL selection, dryRun, batchSize and includeInactive; typed action or dry-run result. |
 | `fleet.bulk_request_agent_diagnostics` | `post-fleet-agents-bulk-request-diagnostics` | `POST /api/fleet/agents/bulk_request_diagnostics` | partial | - | ID/KQL selection, dryRun, batchSize and CPU metric; no includeInactive contract. |
-| `fleet.bulk_unenroll_agents` | `post-fleet-agents-bulk-unenroll` | `POST /api/fleet/agents/bulk_unenroll` | unreviewed | - | Core fields and extensible response; full contract parity not audited. |
-| `fleet.bulk_update_agent_tags` | `post-fleet-agents-bulk-update-agent-tags` | `POST /api/fleet/agents/bulk_update_agent_tags` | unreviewed | - | Core fields and extensible response; full contract parity not audited. |
+| `fleet.bulk_unenroll_agents` | `post-fleet-agents-bulk-unenroll` | `POST /api/fleet/agents/bulk_unenroll` | unreviewed | - | ID/KQL selection, dryRun, batchSize, includeInactive, force and revoke; typed action or dry-run result. |
+| `fleet.bulk_update_agent_tags` | `post-fleet-agents-bulk-update-agent-tags` | `POST /api/fleet/agents/bulk_update_agent_tags` | unreviewed | - | ID/KQL selection, tags to add or remove, dryRun, batchSize and includeInactive; typed action or dry-run result. |
 | `fleet.bulk_upgrade_agents` | `post-fleet-agents-bulk-upgrade` | `POST /api/fleet/agents/bulk_upgrade` | partial | - | Typed selection, dry-run and rollout options; acceptance/count distinguished. No successful binary-upgrade fixture. |
 | `fleet.cancel_agent_action` | `post-fleet-agents-actions-actionid-cancel` | `POST /api/fleet/agents/actions/{actionId}/cancel` | partial | - | JSON runtime response; cancellation supported for upgrade/unenroll only. Wire-tested, no successful cancellation fixture. |
-| `fleet.copy_agent_policy` | `post-fleet-agent-policies-agentpolicyid-copy` | `POST /api/fleet/agent_policies/{agentPolicyId}/copy` | partial | live-fleet | New name only; additional copy options not exposed. |
-| `fleet.create_agent_policy` | `post-fleet-agent-policies` | `POST /api/fleet/agent_policies` | partial | live-fleet | Name, namespace, description, monitoring, output and inactivity options only. |
+| `fleet.copy_agent_policy` | `post-fleet-agent-policies-agentpolicyid-copy` | `POST /api/fleet/agent_policies/{agentPolicyId}/copy` | partial | live-fleet | New name and description. |
+| `fleet.create_agent_policy` | `post-fleet-agent-policies` | `POST /api/fleet/agent_policies` | partial | live-fleet | Typed name, namespace, description, monitoring, output and inactivity settings plus sys_monitoring; other settings only as caller-supplied JSON. |
 | `fleet.create_enrollment_key` | `post-fleet-enrollment-api-keys` | `POST /api/fleet/enrollment_api_keys` | partial | - | Policy, name and expiration; credential redacted in Debug. Selected response fields only. |
 | `fleet.create_package_policy` | `post-fleet-package-policies` | `POST /api/fleet/package_policies` | partial | live-fleet | Simplified inputs with JSON vars; selected top-level fields only. |
-| `fleet.delete_agent_policy` | `post-fleet-agent-policies-delete` | `POST /api/fleet/agent_policies/delete` | unreviewed | live-fleet | Policy-ID deletion; no full contract audit. |
-| `fleet.delete_package_policy` | `delete-fleet-package-policies-packagepolicyid` | `DELETE /api/fleet/package_policies/{packagePolicyId}` | unreviewed | live-fleet | Single package-policy deletion, JSON result. |
+| `fleet.delete_agent_policy` | `post-fleet-agent-policies-delete` | `POST /api/fleet/agent_policies/delete` | unreviewed | live-fleet | Policy-ID deletion with optional force; no full contract audit. |
+| `fleet.delete_package_policy` | `delete-fleet-package-policies-packagepolicyid` | `DELETE /api/fleet/package_policies/{packagePolicyId}` | unreviewed | live-fleet | Single package-policy deletion with optional force, JSON result. |
 | `fleet.download_agent_file` | `get-fleet-agents-files-fileid-filename` | `GET /api/fleet/agents/files/{fileId}/{fileName}` | partial | - | Checked streaming binary response, despite the upstream JSON success schema. |
-| `fleet.download_agent_policy` | `get-fleet-agent-policies-agentpolicyid-download` | `GET /api/fleet/agent_policies/{agentPolicyId}/download` | unreviewed | live-fleet | Streaming policy response; alternate download options not audited. |
-| `fleet.enrollment_key` | `get-fleet-enrollment-api-keys-keyid` | `GET /api/fleet/enrollment_api_keys/{keyId}` | partial | - | Runtime item envelope; credential is redacted in Debug. Selected fields only. |
-| `fleet.enrollment_keys` | `get-fleet-enrollment-api-keys` | `GET /api/fleet/enrollment_api_keys` | partial | - | Explicit pagination and KQL; deprecated duplicate list field omitted. Credentials redacted in Debug. |
-| `fleet.install_integration` | `post-fleet-epm-packages-pkgname-pkgversion` | `POST /api/fleet/epm/packages/{pkgName}/{pkgVersion}` | partial | live-fleet | Default installation options only, JSON asset result. |
-| `fleet.integration` | `get-fleet-epm-packages-pkgname-pkgversion` | `GET /api/fleet/epm/packages/{pkgName}/{pkgVersion}` | unreviewed | live-fleet | Exact package name/version; core fields plus extensible JSON. |
-| `fleet.integrations` | `get-fleet-epm-packages` | `GET /api/fleet/epm/packages` | partial | live-fleet | Default package catalogue, no catalogue filters exposed. |
-| `fleet.outputs` | `get-fleet-outputs` | `GET /api/fleet/outputs` | unreviewed | live-fleet | Default output listing as JSON; not output management. |
-| `fleet.package_policies` | `get-fleet-package-policies` | `GET /api/fleet/package_policies` | partial | live-fleet | Page, page size and kuery only. |
-| `fleet.package_policy` | `get-fleet-package-policies-packagepolicyid` | `GET /api/fleet/package_policies/{packagePolicyId}` | unreviewed | live-fleet | Core fields plus extensible JSON; inputs remain JSON. |
+| `fleet.download_agent_policy` | `get-fleet-agent-policies-agentpolicyid-download` | `GET /api/fleet/agent_policies/{agentPolicyId}/download` | unreviewed | live-fleet | Checked raw YAML response with standalone and Kubernetes options; download and revision options not exposed. |
+| `fleet.find_agent_policies` | `get-fleet-agent-policies` | `GET /api/fleet/agent_policies` | partial | live-fleet | Page, page size, KQL and sorting; requests full policies and agent counts by default. No format or upgradeable filters. |
+| `fleet.find_agents` | `get-fleet-agents` | `GET /api/fleet/agents` | partial | live-fleet | Page, page size, KQL, inactive agents and sorting; no metrics, status summary or point-in-time paging. Historical operation-level evidence used an empty fleet. |
+| `fleet.find_enrollment_keys` | `get-fleet-enrollment-api-keys` | `GET /api/fleet/enrollment_api_keys` | partial | - | Explicit pagination and KQL; deprecated duplicate list field omitted. Credentials redacted in Debug. |
+| `fleet.find_package_policies` | `get-fleet-package-policies` | `GET /api/fleet/package_policies` | partial | live-fleet | Page, page size, KQL and sorting; no format or agent-count options. |
+| `fleet.get_agent` | `get-fleet-agents-agentid` | `GET /api/fleet/agents/{agentId}` | unreviewed | - | Core fields plus extensible JSON; real-agent state and policy acknowledgment are exercised by deployment tests. |
+| `fleet.get_agent_policy` | `get-fleet-agent-policies-agentpolicyid` | `GET /api/fleet/agent_policies/{agentPolicyId}` | unreviewed | live-fleet | Core policy fields plus extensible JSON. |
+| `fleet.get_enrollment_key` | `get-fleet-enrollment-api-keys-keyid` | `GET /api/fleet/enrollment_api_keys/{keyId}` | partial | - | Runtime item envelope; credential is redacted in Debug. Selected fields only. |
+| `fleet.get_package` | `get-fleet-epm-packages-pkgname-pkgversion` | `GET /api/fleet/epm/packages/{pkgName}/{pkgVersion}` | unreviewed | live-fleet | Exact package name/version; core fields plus extensible JSON. |
+| `fleet.get_package_policy` | `get-fleet-package-policies-packagepolicyid` | `GET /api/fleet/package_policies/{packagePolicyId}` | unreviewed | live-fleet | Core fields plus extensible JSON; inputs remain JSON. |
+| `fleet.install_package` | `post-fleet-epm-packages-pkgname-pkgversion` | `POST /api/fleet/epm/packages/{pkgName}/{pkgVersion}` | partial | live-fleet | Force and ignore_constraints options; query options not exposed. JSON asset result. |
+| `fleet.list_agent_uploads` | `get-fleet-agents-agentid-uploads` | `GET /api/fleet/agents/{agentId}/uploads` | partial | - | Typed status, action ID and file metadata; caller correlates readiness before download. |
+| `fleet.list_outputs` | `get-fleet-outputs` | `GET /api/fleet/outputs` | unreviewed | live-fleet | Default output listing as JSON; not output management. |
+| `fleet.list_packages` | `get-fleet-epm-packages` | `GET /api/fleet/epm/packages` | partial | live-fleet | Category and prerelease filters; other catalogue options not exposed. |
 | `fleet.reassign_agent` | `post-fleet-agents-agentid-reassign` | `POST /api/fleet/agents/{agentId}/reassign` | unreviewed | - | Policy-ID reassignment request; deployment tests verify the agent's policy and revision acknowledgment. |
 | `fleet.request_agent_diagnostics` | `post-fleet-agents-agentid-request-diagnostics` | `POST /api/fleet/agents/{agentId}/request_diagnostics` | partial | - | Optional CPU metrics; asynchronous action result, follow upload readiness before download. |
 | `fleet.revoke_enrollment_key` | `delete-fleet-enrollment-api-keys-keyid` | `DELETE /api/fleet/enrollment_api_keys/{keyId}` | partial | - | Default revocation only; 9.5-only forceDelete/includeHidden options omitted for 9.4 compatibility. |
 | `fleet.setup` | `post-fleet-setup` | `POST /api/fleet/setup` | unreviewed | live-fleet | Published in the bundle under Fleet internals; do not infer a stable lifecycle from documentation. |
-| `fleet.unenroll_agent` | `post-fleet-agents-agentid-unenroll` | `POST /api/fleet/agents/{agentId}/unenroll` | partial | - | Default unenrollment options only; the deployment suite currently exercises bulk unenrollment. |
-| `fleet.uninstall_integration` | `delete-fleet-epm-packages-pkgname-pkgversion` | `DELETE /api/fleet/epm/packages/{pkgName}/{pkgVersion}` | unreviewed | - | Default removal request; deployment tests remove the owned integration after unenrollment. |
-| `fleet.update_agent_policy` | `put-fleet-agent-policies-agentpolicyid` | `PUT /api/fleet/agent_policies/{agentPolicyId}` | partial | live-fleet | Same limited policy settings as creation. |
+| `fleet.unenroll_agent` | `post-fleet-agents-agentid-unenroll` | `POST /api/fleet/agents/{agentId}/unenroll` | partial | - | Force and revoke options; the deployment suite currently exercises bulk unenrollment. |
+| `fleet.uninstall_package` | `delete-fleet-epm-packages-pkgname-pkgversion` | `DELETE /api/fleet/epm/packages/{pkgName}/{pkgVersion}` | unreviewed | - | Optional force; deployment tests remove the owned integration after unenrollment. |
+| `fleet.update_agent_policy` | `put-fleet-agent-policies-agentpolicyid` | `PUT /api/fleet/agent_policies/{agentPolicyId}` | partial | live-fleet | Same typed policy settings as creation; other settings only as caller-supplied JSON. |
 | `fleet.update_package_policy` | `put-fleet-package-policies-packagepolicyid` | `PUT /api/fleet/package_policies/{packagePolicyId}` | partial | live-fleet | Simplified input format and selected fields only. |
 | `fleet.upgrade_agent` | `post-fleet-agents-agentid-upgrade` | `POST /api/fleet/agents/{agentId}/upgrade` | partial | - | Typed request; JSON acknowledgment only. Successful binary upgrades require a service-installed Agent; container rejection is not upgrade certification. |
 | `roles.delete` | `delete-security-role-name` | `DELETE /api/security/role/{name}` | unreviewed | live-roles-spaces | Single global role deletion; no full contract audit. |
-| `roles.get` | `get-security-role-name` | `GET /api/security/role/{name}` | partial | live-roles-spaces | Kibana privileges and JSON Elasticsearch privileges; additional metadata discarded. |
-| `roles.list` | `get-security-role` | `GET /api/security/role` | partial | live-roles-spaces | Kibana privileges and JSON Elasticsearch privileges; additional metadata discarded. |
-| `roles.put` | `put-security-role-name` | `PUT /api/security/role/{name}` | partial | live-roles-spaces | Kibana and Elasticsearch privileges; other role settings not modeled. |
-| `security.create_rule` | `CreateRule` | `POST /api/detection_engine/rules` | partial | live-rules | KQL/Lucene query rules and exception-list associations; other rule types and advanced settings lack creation types. |
+| `roles.get` | `get-security-role-name` | `GET /api/security/role/{name}` | partial | live-roles-spaces | Kibana privileges, JSON Elasticsearch privileges, description and metadata; read-only fields kept separately. |
+| `roles.list` | `get-security-role` | `GET /api/security/role` | partial | live-roles-spaces | Kibana privileges, JSON Elasticsearch privileges, description and metadata; read-only fields kept separately. |
+| `roles.put` | `put-security-role-name` | `PUT /api/security/role/{name}` | partial | live-roles-spaces | Kibana and Elasticsearch privileges, description, metadata and createOnly; other settings only as caller-supplied JSON. |
+| `security.create_alerts_index` | `CreateAlertsIndex` | `POST /api/detection_engine/index` | unreviewed | live-rules | Alert-index initialization only; not detection execution. |
+| `security.create_rule` | `CreateRule` | `POST /api/detection_engine/rules` | partial | live-rules | Typed KQL/Lucene query rules with exception-list associations; other rule types only as caller-supplied JSON. |
 | `security.delete_rule` | `DeleteRule` | `DELETE /api/detection_engine/rules` | unreviewed | live-rules | ID or rule_id lookup; complete deletion contract not audited. |
-| `security.export_rules` | `ExportRules` | `POST /api/detection_engine/rules/_export` | partial | live-rules | Explicit rule_id selection, streaming NDJSON; additional export options not exposed. |
-| `security.import_rules` | `ImportRules` | `POST /api/detection_engine/rules/_import` | partial | live-rules | Multipart NDJSON and overwrite only; HTTP-200 partial failures retained as JSON. |
-| `security.initialize` | `CreateAlertsIndex` | `POST /api/detection_engine/index` | unreviewed | live-rules | Alert-index initialization only; not detection execution. |
+| `security.export_rules` | `ExportRules` | `POST /api/detection_engine/rules/_export` | partial | live-rules | Optional rule_id selection, exclude_export_details and file_name; raw NDJSON response. |
+| `security.find_rules` | `FindRules` | `GET /api/detection_engine/rules/_find` | partial | live-rules | Page, page size, filter and sorting; no field selection or gap filters. |
+| `security.get_rule` | `ReadRule` | `GET /api/detection_engine/rules` | unreviewed | live-rules | ID or rule_id lookup; response has core fields and an extensible JSON map. |
+| `security.import_rules` | `ImportRules` | `POST /api/detection_engine/rules/_import` | partial | live-rules | Multipart NDJSON with overwrite, exception, connector and new-list options; HTTP-200 partial failures retained. |
+| `security.patch_rule` | `PatchRule` | `PATCH /api/detection_engine/rules` | partial | live-rules | Typed common fields and exception-list replacement; any other field through PatchRule::field. |
 | `security.privileges` | `ReadPrivileges` | `GET /api/detection_engine/privileges` | unreviewed | live-rules | JSON privilege response; exercised only as administrator in the live suite. |
-| `security.rule` | `ReadRule` | `GET /api/detection_engine/rules` | unreviewed | live-rules | ID or rule_id lookup; response has core fields and an extensible JSON map. |
-| `security.rules` | `FindRules` | `GET /api/detection_engine/rules/_find` | partial | live-rules | Page, page size and filter exposed; other search options not modeled. |
-| `security.update_rule` | `PatchRule` | `PATCH /api/detection_engine/rules` | partial | live-rules | Common fields plus replacement of exception-list associations; other advanced fields not modeled. |
-| `spaces.create` | `post-spaces-space` | `POST /api/spaces/space` | partial | live-roles-spaces | ID, name, description and disabled features only. |
+| `spaces.create` | `post-spaces-space` | `POST /api/spaces/space` | partial | live-roles-spaces | Typed ID, name, description and disabled features; other fields kept in an extensible map. |
 | `spaces.delete` | `delete-spaces-space-id` | `DELETE /api/spaces/space/{id}` | unreviewed | live-roles-spaces | Single space deletion; no full contract audit. |
-| `spaces.get` | `get-spaces-space-id` | `GET /api/spaces/space/{id}` | partial | live-roles-spaces | ID, name, description and disabled features only; additional fields discarded. |
-| `spaces.list` | `get-spaces-space` | `GET /api/spaces/space` | partial | live-roles-spaces | Core space fields only; no optional listing parameters. |
-| `spaces.update` | `put-spaces-space-id` | `PUT /api/spaces/space/{id}` | partial | live-roles-spaces | Same limited fields as creation. |
+| `spaces.get` | `get-spaces-space-id` | `GET /api/spaces/space/{id}` | partial | live-roles-spaces | Typed ID, name, description and disabled features; other fields kept in an extensible map. |
+| `spaces.list` | `get-spaces-space` | `GET /api/spaces/space` | partial | live-roles-spaces | Same space fields as get; no optional listing parameters. |
+| `spaces.update` | `put-spaces-space-id` | `PUT /api/spaces/space/{id}` | partial | live-roles-spaces | Same fields as creation; extensible fields are sent back unchanged. |
 
 ## Evidence references
 
