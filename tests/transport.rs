@@ -1,90 +1,128 @@
-use axum::{
-    Router,
-    body::Body,
-    extract::{Request, State},
-    http::{Response, StatusCode},
-    routing::any,
-};
-use kibana_rs::exceptions::{
-    Entry, ListReference, NamespaceType, NestedEntry, Operator, ValueListReference,
-};
-use kibana_rs::fleet::{
-    ActionOptions, AgentSelection, BulkActionResult, BulkAgents, TagUpdate, UpgradeAgent,
-    UpgradeRollout,
-};
-use kibana_rs::{Auth, Client, Error, Method, Scope};
-use serde_json::{Value, json};
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+mod common;
 
-async fn mock(handler: Router) -> (String, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    let task = tokio::spawn(async move {
-        axum::serve(listener, handler).await.unwrap();
-    });
-    (format!("http://{address}"), task)
+use std::time::Duration;
+
+use common::Mock;
+use futures_util::TryStreamExt;
+use kibana_rs::{
+    Error, Kibana, Scope,
+    http::{
+        Body, Credentials, Method, StatusCode, Transport, TransportBuilder, Url,
+        headers::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue},
+    },
+};
+use serde_json::{Value, json};
+
+fn transport(url: &str) -> TransportBuilder {
+    TransportBuilder::new(Url::parse(url).unwrap())
 }
 
 #[tokio::test]
-async fn routing_preserves_proxy_prefix_and_encodes_ids_without_scoping_global_calls() {
-    let (url, task) = mock(Router::new().fallback(any(|req: Request| async move {
-        axum::Json(
-            json!({"uri":req.uri().to_string(), "xsrf":req.headers()["kbn-xsrf"].to_str().unwrap(),
-            "auth":req.headers()["authorization"].to_str().unwrap()}),
+async fn routing_preserves_proxy_prefix_and_encodes_segments_without_scoping_global_routes() {
+    let mock = Mock::start_at("/kibana/proxy/").await;
+    let client = Kibana::new(
+        transport(&mock.url)
+            .auth(Credentials::EncodedApiKey("test-key".into()))
+            .build()
+            .unwrap(),
+    )
+    .space("soc")
+    .unwrap();
+
+    mock.json(json!({"ok": true}));
+    let value = client
+        .request(
+            Method::GET,
+            Scope::Space,
+            &["api", "things", "id/with?reserved#chars"],
         )
-    })))
-    .await;
-    let client = Client::builder(format!("{url}/kibana/proxy/"))
-        .auth(Auth::ApiKey("test-key".into()))
-        .build()
+        .query(&[("filter", "name: a+b & c")])
+        .send()
+        .await
         .unwrap()
-        .space("soc")
-        .unwrap();
-    let result: Value = client
-        .json(
-            client
-                .request(
-                    Method::GET,
-                    Scope::Space,
-                    &["api", "things", "id/with?reserved#chars"],
-                )
-                .unwrap()
-                .query(&[("filter", "name: a+b & c")]),
-        )
+        .json()
         .await
         .unwrap();
+    assert_eq!(value, json!({"ok": true}));
+    let request = mock.take();
     assert_eq!(
-        result["uri"],
-        "/kibana/proxy/s/soc/api/things/id%2Fwith%3Freserved%23chars?filter=name%3A+a%2Bb+%26+c"
+        request.path,
+        "/kibana/proxy/s/soc/api/things/id%2Fwith%3Freserved%23chars"
     );
-    assert_eq!(result["auth"], "ApiKey test-key");
-    assert_eq!(result["xsrf"], "kibana-rs");
-    let status = client.status().await.unwrap();
-    assert_eq!(status["uri"], "/kibana/proxy/api/status");
-    task.abort();
+    assert_eq!(request.query.as_deref(), Some("filter=name%3A+a%2Bb+%26+c"));
+    assert_eq!(request.header("authorization"), Some("ApiKey test-key"));
+    assert_eq!(request.header("kbn-xsrf"), Some("kibana-rs"));
+    assert!(
+        request
+            .header("user-agent")
+            .unwrap()
+            .starts_with("kibana-rs/")
+    );
+    request.no_body();
+
+    mock.json(json!({"status": {}}));
+    client.status().send().await.unwrap();
+    mock.take().route("GET", "/kibana/proxy/api/status", &[]);
+    mock.json(json!([]));
+    client
+        .default_space()
+        .request(Method::GET, Scope::Space, &["api", "x"])
+        .send()
+        .await
+        .unwrap();
+    mock.take().route("GET", "/kibana/proxy/api/x", &[]);
 }
 
 #[tokio::test]
-async fn errors_keep_status_headers_and_bounded_non_json_body() {
-    let (url, task) = mock(Router::new().fallback(any(|| async {
-        Response::builder()
-            .status(429)
-            .header("retry-after", "3")
-            .body(Body::from("x".repeat(20_000)))
-            .unwrap()
-    })))
-    .await;
-    let client = Client::builder(url).build().unwrap();
-    let error = client.status().await.unwrap_err();
-    match error {
+async fn basic_credentials_and_transport_headers_are_sent_and_requests_can_override_them() {
+    let mock = Mock::start().await;
+    let client = Kibana::new(
+        transport(&mock.url)
+            .auth(Credentials::Basic("elastic".into(), "changeme".into()))
+            .header(
+                HeaderName::from_static("elastic-api-version"),
+                HeaderValue::from_static("2023-10-31"),
+            )
+            .build()
+            .unwrap(),
+    );
+    mock.json(json!({}));
+    client.status().send().await.unwrap();
+    let request = mock.take();
+    assert_eq!(
+        request.header("authorization"),
+        Some("Basic ZWxhc3RpYzpjaGFuZ2VtZQ==")
+    );
+    assert_eq!(request.header("elastic-api-version"), Some("2023-10-31"));
+
+    mock.json(json!({}));
+    client
+        .status()
+        .header(AUTHORIZATION, HeaderValue::from_static("Bearer run-as"))
+        .header(
+            HeaderName::from_static("kbn-xsrf"),
+            HeaderValue::from_static("custom"),
+        )
+        .send()
+        .await
+        .unwrap();
+    let request = mock.take();
+    assert_eq!(request.header("authorization"), Some("Bearer run-as"));
+    assert_eq!(request.header("kbn-xsrf"), Some("custom"));
+}
+
+#[tokio::test]
+async fn errors_keep_status_headers_bounded_body_and_kibana_message() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    mock.reply_with(429, vec![("retry-after", "3".into())], "x".repeat(20_000));
+    match client.status().send().await.unwrap_err() {
         Error::Api {
             status,
             headers,
             body,
             truncated,
+            ..
         } => {
             assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
             assert_eq!(headers["retry-after"], "3");
@@ -93,349 +131,275 @@ async fn errors_keep_status_headers_and_bounded_non_json_body() {
         }
         other => panic!("wrong error: {other}"),
     }
-    task.abort();
+
+    mock.reply(
+        409,
+        json!({"statusCode": 409, "error": "Conflict", "message": "version conflict"}).to_string(),
+    );
+    let error = client.status().send().await.unwrap_err();
+    assert_eq!(error.status(), Some(StatusCode::CONFLICT));
+    assert_eq!(error.message().as_deref(), Some("version conflict"));
+    assert!(error.body().unwrap().contains("Conflict"));
+    assert!(
+        !error.to_string().contains("version conflict"),
+        "bodies stay out of Display"
+    );
 }
 
 #[tokio::test]
-async fn ambiguous_mutations_are_not_retried_and_redirects_are_not_followed() {
-    let calls = Arc::new(AtomicUsize::new(0));
-    let (url, task) = mock(
-        Router::new()
-            .fallback(any(
-                |State(count): State<Arc<AtomicUsize>>, req: Request| async move {
-                    count.fetch_add(1, Ordering::SeqCst);
-                    if req.uri().path() == "/api/redirect" {
-                        Response::builder()
-                            .status(307)
-                            .header("location", "/api/write")
-                            .body(Body::empty())
-                            .unwrap()
-                    } else {
-                        Response::builder()
-                            .status(503)
-                            .body(Body::from("uncertain write outcome"))
-                            .unwrap()
-                    }
-                },
-            ))
-            .with_state(calls.clone()),
-    )
-    .await;
-    let client = Client::builder(url).build().unwrap();
-    for (path, status) in [("write", 503), ("redirect", 307)] {
+async fn mutations_are_not_retried_and_redirects_are_not_followed() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    mock.reply(503, "uncertain write outcome");
+    mock.reply_with(307, vec![("location", "/api/write".into())], "");
+    for status in [503, 307] {
         let error = client
-            .execute(
-                client
-                    .request(Method::POST, Scope::Space, &["api", path])
-                    .unwrap()
-                    .json(&json!({})),
-            )
+            .request(Method::POST, Scope::Space, &["api", "write"])
+            .json(&json!({}))
+            .send()
             .await
             .unwrap_err();
         assert_eq!(error.status().unwrap().as_u16(), status);
     }
-    assert_eq!(calls.load(Ordering::SeqCst), 2);
-    task.abort();
+    assert_eq!(mock.request_count(), 2);
 }
 
 #[tokio::test]
 async fn response_limits_and_decode_errors_are_distinct() {
-    let (url, task) =
-        mock(Router::new().fallback(any(|| async { "<html>login required</html>" }))).await;
-    let client = Client::builder(&url).build().unwrap();
+    let mock = Mock::start().await;
+    mock.reply(200, "<html>login required</html>");
     assert!(matches!(
-        client.status().await.unwrap_err(),
+        mock.client()
+            .status()
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap_err(),
         Error::Decode {
             status: StatusCode::OK,
             ..
         }
     ));
-    let limited = Client::builder(&url).response_limit(8).build().unwrap();
+
+    let limited = Kibana::new(transport(&mock.url).response_limit(8).build().unwrap());
+    mock.reply(200, "0123456789");
     assert!(matches!(
-        limited.status().await.unwrap_err(),
+        limited
+            .status()
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap_err(),
         Error::ResponseTooLarge { limit: 8 }
     ));
-    task.abort();
+    mock.reply(200, "0123456789");
+    assert!(matches!(
+        limited
+            .status()
+            .send()
+            .await
+            .unwrap()
+            .text()
+            .await
+            .unwrap_err(),
+        Error::ResponseTooLarge { limit: 8 }
+    ));
+    mock.reply(200, "0123456789");
+    let chunks: Vec<_> = limited
+        .status()
+        .send()
+        .await
+        .unwrap()
+        .bytes_stream()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(chunks.concat(), b"0123456789", "streams are not limited");
+}
+
+#[tokio::test]
+async fn responses_expose_status_headers_and_alternative_decoding() {
+    let mock = Mock::start().await;
+    mock.reply_with(
+        201,
+        vec![("x-trace", "abc".into())],
+        r#"{"version":{"number":"9.5.4"}}"#,
+    );
+    let response = mock.client().status().send().await.unwrap();
+    assert_eq!(response.status_code(), StatusCode::CREATED);
+    assert_eq!(response.headers()["x-trace"], "abc");
+    assert_eq!(response.content_length(), Some(30));
+    #[derive(serde::Deserialize)]
+    struct Version {
+        number: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Status {
+        version: Version,
+    }
+    assert_eq!(
+        response.json_as::<Status>().await.unwrap().version.number,
+        "9.5.4"
+    );
+}
+
+#[tokio::test]
+async fn invalid_requests_fail_on_send_without_contacting_kibana() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    for error in [
+        client
+            .request(Method::GET, Scope::Global, &["api", ".."])
+            .send()
+            .await
+            .unwrap_err(),
+        client
+            .request(Method::GET, Scope::Global, &[])
+            .send()
+            .await
+            .unwrap_err(),
+        client.cases().get("").send().await.unwrap_err(),
+        client.spaces().delete(".").send().await.unwrap_err(),
+    ] {
+        assert!(matches!(error, Error::InvalidRequest(_)), "{error}");
+    }
+    let raw = client
+        .transport()
+        .send::<()>(
+            Method::GET,
+            "/api/x?y=1",
+            HeaderMap::new(),
+            None,
+            None,
+            None,
+        )
+        .await;
+    assert!(matches!(raw.unwrap_err(), Error::InvalidRequest(_)));
+    assert_eq!(mock.request_count(), 0);
 }
 
 #[test]
-fn invalid_configuration_and_debug_do_not_leak_credentials() {
+fn invalid_configuration_is_rejected_and_debug_output_hides_credentials() {
     for url in [
         "file:///tmp/test",
         "http://user:secret@localhost",
         "http://localhost?token=secret",
         "http://localhost/#fragment",
     ] {
-        assert!(Client::builder(url).build().is_err());
+        assert!(
+            matches!(transport(url).build().unwrap_err(), Error::Configuration(_)),
+            "{url}"
+        );
     }
-    let auth = Auth::Basic {
-        username: "a".into(),
-        password: "supersecret".into(),
-    };
-    assert!(!format!("{auth:?}").contains("supersecret"));
-    let client = Client::builder("http://localhost")
-        .auth(auth)
-        .build()
-        .unwrap();
-    assert!(!format!("{client:?}").contains("supersecret"));
-    assert!(client.space("../admin").is_err());
+    assert!(Transport::single_node("not a url").is_err());
     assert!(
-        client
-            .request(Method::GET, Scope::Global, &["api", ".."])
+        transport("http://localhost")
+            .response_limit(0)
+            .build()
             .is_err()
     );
+    assert!(
+        transport("http://localhost")
+            .auth(Credentials::Bearer("bad\ntoken".into()))
+            .build()
+            .is_err()
+    );
+
+    let credentials = Credentials::Basic("a".into(), "supersecret".into());
+    assert!(!format!("{credentials:?}").contains("supersecret"));
+    let builder = transport("http://localhost").auth(credentials);
+    assert!(!format!("{builder:?}").contains("supersecret"));
+    let client = Kibana::new(builder.build().unwrap());
+    assert!(!format!("{client:?}").contains("supersecret"));
+    for invalid in ["", ".", "..", "../admin"] {
+        assert!(client.space(invalid).is_err(), "{invalid}");
+    }
+    assert_eq!(client.space("soc").unwrap().space_id(), Some("soc"));
+
+    let cloud = Transport::cloud(
+        "prod:dXMtZWFzdC0xLmF3cy5mb3VuZC5pbyRlcy11dWlkJGtiLXV1aWQ=",
+        Credentials::EncodedApiKey("key".into()),
+    )
+    .unwrap();
+    assert_eq!(
+        cloud.url().as_str(),
+        "https://kb-uuid.us-east-1.aws.found.io/"
+    );
 }
 
 #[tokio::test]
-async fn request_timeout_is_a_transport_error() {
-    let (url, task) = mock(Router::new().fallback(any(|| async {
-        tokio::time::sleep(std::time::Duration::from_secs(5)).await;
-        axum::Json(json!({"status": "late"}))
-    })))
-    .await;
-    let client = Client::builder(url)
-        .timeout(std::time::Duration::from_millis(100))
-        .build()
-        .unwrap();
+async fn transport_and_request_timeouts_are_transport_errors() {
+    let mock = Mock::start().await;
+    mock.reply_after(Duration::from_secs(5));
+    mock.reply_after(Duration::from_secs(5));
+    let client = Kibana::new(
+        transport(&mock.url)
+            .timeout(Duration::from_millis(100))
+            .build()
+            .unwrap(),
+    );
     assert!(matches!(
-        client.status().await.unwrap_err(),
+        client.request(Method::GET, Scope::Global, &["api", "status"]).send().await.unwrap_err(),
         Error::Transport(error) if error.is_timeout()
     ));
-    task.abort();
-}
-
-#[test]
-fn exception_entry_variants_match_the_public_wire_contract() {
-    let entries = vec![
-        Entry::Match {
-            field: "host.name".into(),
-            operator: Operator::Included,
-            value: "scanner".into(),
-        },
-        Entry::MatchAny {
-            field: "host.name".into(),
-            operator: Operator::Excluded,
-            value: vec!["one".into(), "two".into()],
-        },
-        Entry::Exists {
-            field: "user.name".into(),
-            operator: Operator::Included,
-        },
-        Entry::Wildcard {
-            field: "process.executable".into(),
-            operator: Operator::Included,
-            value: "/opt/scanner/*".into(),
-        },
-        Entry::List {
-            field: "source.ip".into(),
-            operator: Operator::Included,
-            list: ValueListReference {
-                id: "scanner-ips".into(),
-                list_type: "ip".into(),
-            },
-        },
-        Entry::Nested {
-            field: "process.Ext.code_signature".into(),
-            entries: vec![NestedEntry::Match {
-                field: "subject_name".into(),
-                operator: Operator::Included,
-                value: "Vendor".into(),
-            }],
-        },
-    ];
-    assert_eq!(
-        serde_json::to_value(&entries).unwrap(),
-        json!([
-            {"type":"match","field":"host.name","operator":"included","value":"scanner"},
-            {"type":"match_any","field":"host.name","operator":"excluded","value":["one","two"]},
-            {"type":"exists","field":"user.name","operator":"included"},
-            {"type":"wildcard","field":"process.executable","operator":"included","value":"/opt/scanner/*"},
-            {"type":"list","field":"source.ip","operator":"included","list":{"id":"scanner-ips","type":"ip"}},
-            {"type":"nested","field":"process.Ext.code_signature","entries":[{"type":"match","field":"subject_name","operator":"included","value":"Vendor"}]}
-        ])
-    );
+    let error = mock
+        .client()
+        .status()
+        .request_timeout(Duration::from_millis(100))
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(error, Error::Transport(e) if e.is_timeout()));
 }
 
 #[tokio::test]
-async fn exception_exports_encode_selectors_and_imports_preserve_partial_failures() {
-    let (url, task) = mock(Router::new().fallback(any(|req: Request| async move {
-        assert_eq!(req.method(), "POST");
-        assert!(req.headers().contains_key("kbn-xsrf"));
-        match req.uri().path() {
-            "/proxy/s/soc/api/exception_lists/_export" => {
-                let query: std::collections::HashMap<_, _> = url::form_urlencoded::parse(req.uri().query().unwrap().as_bytes()).into_owned().collect();
-                assert_eq!(query["list_id"], "allowlist &/?");
-                assert_eq!(query["id"], "saved-object-id");
-                assert_eq!(query["namespace_type"], "agnostic");
-                assert_eq!(query["include_expired_exceptions"], "false");
-                Response::new(Body::from("{\"list_id\":\"exported\"}\n"))
-            }
-            "/proxy/s/soc/api/exception_lists/_import" => {
-                assert_eq!(req.uri().query(), Some("overwrite=false&as_new_list=true"));
-                assert!(req.headers()["content-type"].to_str().unwrap().starts_with("multipart/form-data; boundary="));
-                let bytes = axum::body::to_bytes(req.into_body(), 8192).await.unwrap();
-                let body = String::from_utf8(bytes.to_vec()).unwrap();
-                assert!(body.contains("name=\"file\"; filename=\"exceptions.ndjson\""));
-                assert!(body.contains("{\"list_id\":\"exported\"}\n"));
-                Response::new(Body::from(json!({"success":false,"success_count":1,"errors":[{"error":{"status_code":409,"message":"conflict"}}],"success_count_exception_lists":1,"success_count_exception_list_items":0}).to_string()))
-            }
-            other => panic!("unexpected route {other}"),
-        }
-    }))).await;
-    let client = Client::builder(format!("{url}/proxy"))
-        .build()
-        .unwrap()
-        .space("soc")
-        .unwrap();
-    let export = client
-        .exceptions()
-        .export_list(
-            &ListReference {
-                id: "saved-object-id".into(),
-                list_id: "allowlist &/?".into(),
-                namespace_type: NamespaceType::Agnostic,
-                list_type: "detection".into(),
-            },
-            false,
+async fn raw_transport_send_encodes_query_and_json_body() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    mock.json(json!({"accepted": true}));
+    let mut headers = HeaderMap::new();
+    headers.insert("x-opaque-id", HeaderValue::from_static("trace-1"));
+    let value: Value = client
+        .transport()
+        .send(
+            Method::POST,
+            "api/lists/items",
+            headers,
+            Some(&[("list_id", "ip list"), ("refresh", "true")]),
+            Some(Body::json(&json!({"value": "10.0.0.1"})).unwrap()),
+            None,
         )
         .await
         .unwrap()
-        .bytes()
+        .json()
         .await
         .unwrap();
-    let result = client
-        .exceptions()
-        .import_lists(export.to_vec(), false, true)
-        .await
-        .unwrap();
-    assert!(!result.success);
-    assert_eq!(result.success_count, 1);
-    assert_eq!(result.errors[0]["error"]["status_code"], 409);
-    assert_eq!(result.extra["success_count_exception_list_items"], 0);
-    task.abort();
+    assert_eq!(value["accepted"], true);
+    let request = mock.take();
+    request
+        .route(
+            "POST",
+            "/api/lists/items",
+            &[("list_id", "ip list"), ("refresh", "true")],
+        )
+        .body(json!({"value": "10.0.0.1"}));
+    assert_eq!(request.header("x-opaque-id"), Some("trace-1"));
 }
 
 #[tokio::test]
-async fn fleet_bulk_requests_preserve_selection_options_and_response_variants() {
-    let (url, task) = mock(Router::new().fallback(any(|req: Request| async move {
-        assert_eq!(req.method(), "POST");
-        let path = req.uri().path().to_owned();
-        let bytes = axum::body::to_bytes(req.into_body(), 8192).await.unwrap();
-        let body: Value = serde_json::from_slice(&bytes).unwrap();
-        let result = match path.as_str() {
-            "/s/soc/api/fleet/agents/bulk_upgrade" => {
-                assert_eq!(body, json!({"agents":"tags:owned-fixture","dryRun":true,"batchSize":2,"version":"9.5.4","start_time":"2030-01-01T00:00:00Z","rollout_duration_seconds":600}));
-                json!({"count":2})
-            }
-            "/s/soc/api/fleet/agents/bulk_update_agent_tags" => {
-                assert_eq!(body, json!({"agents":["one","two"],"dryRun":false,"tagsToAdd":["investigate"],"tagsToRemove":["old"]}));
-                json!({"actionId":"accepted-action"})
-            }
-            "/s/soc/api/fleet/agents/bulk_request_diagnostics" => {
-                assert_eq!(body, json!({"agents":["one","two"],"dryRun":false}));
-                json!({"actionId":"diagnostics-action"})
-            }
-            "/s/soc/api/fleet/agents/one/upgrade" => {
-                assert_eq!(body, json!({"version":"9.5.4"}));
-                json!({})
-            }
-            "/s/soc/api/fleet/agents/actions/upgrade%2Fid/cancel" => json!({"item":{"id":"cancel-id","type":"CANCEL","created_at":"2026-09-26T00:00:00Z"}}),
-            other => panic!("unexpected route {other}"),
-        };
-        axum::Json(result)
-    }))).await;
-    let client = Client::builder(url).build().unwrap().space("soc").unwrap();
-    let query = BulkAgents {
-        agents: AgentSelection::Query("tags:owned-fixture".into()),
-        dry_run: true,
-        batch_size: Some(2),
-    };
-    let upgrade = UpgradeAgent::new("9.5.4");
-    let result = client
-        .fleet()
-        .bulk_upgrade_agents(
-            &query,
-            &upgrade,
-            &UpgradeRollout {
-                start_time: Some("2030-01-01T00:00:00Z".into()),
-                rollout_duration_seconds: Some(600),
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert!(matches!(result, BulkActionResult::DryRun { count: 2 }));
-    let ids = BulkAgents::new(AgentSelection::Ids(vec!["one".into(), "two".into()]));
-    let result = client
-        .fleet()
-        .bulk_update_agent_tags(
-            &ids,
-            &TagUpdate {
-                tags_to_add: vec!["investigate".into()],
-                tags_to_remove: vec!["old".into()],
-                ..Default::default()
-            },
-        )
-        .await
-        .unwrap();
-    assert!(
-        matches!(result, BulkActionResult::Action { action_id } if action_id == "accepted-action")
+async fn an_explicit_proxy_receives_requests_for_the_kibana_host() {
+    let proxy = Mock::start().await;
+    let client = Kibana::new(
+        transport("http://kibana.invalid:5601")
+            .proxy(Url::parse(&proxy.url).unwrap())
+            .build()
+            .unwrap(),
     );
-    assert!(
-        matches!(client.fleet().bulk_request_agent_diagnostics(&ids, &Default::default()).await.unwrap(), BulkActionResult::Action { action_id } if action_id == "diagnostics-action")
-    );
-    assert_eq!(
-        client.fleet().upgrade_agent("one", &upgrade).await.unwrap(),
-        json!({})
-    );
-    assert_eq!(
-        client
-            .fleet()
-            .cancel_agent_action("upgrade/id")
-            .await
-            .unwrap()["item"]["id"],
-        "cancel-id"
-    );
-    task.abort();
-}
-
-#[tokio::test]
-async fn fleet_history_preserves_failures_and_downloads_are_binary() {
-    let (url, task) = mock(Router::new().fallback(any(|req: Request| async move {
-        assert_eq!(req.method(), "GET");
-        match req.uri().path() {
-            "/api/fleet/agents/action_status" => {
-                assert_eq!(req.uri().query(), Some("page=0&perPage=20&errorSize=5"));
-                Response::new(Body::from(json!({"items":[{"actionId":"mixed","type":"FUTURE_ACTION","status":"IN_PROGRESS","nbAgentsActionCreated":3,"nbAgentsAck":1,"nbAgentsFailed":1,"nbAgentsActioned":3,"latestErrors":[{"agentId":"failed-agent","error":"agent unavailable"}],"future_detail":"retained"}]}).to_string()))
-            }
-            "/api/fleet/enrollment_api_keys/key-id" => Response::new(Body::from(json!({"item":{"id":"key-id","api_key_id":"es-key-id","api_key":"do-not-log-this-key","active":true}}).to_string())),
-            "/api/fleet/agents/files/file%2Fid/diagnostics%20file.zip" => Response::builder().header("content-type", "application/octet-stream").body(Body::from(vec![80,75,3,4,0,255])).unwrap(),
-            other => panic!("unexpected route {other}"),
-        }
-    }))).await;
-    let client = Client::builder(url).build().unwrap();
-    let actions = client
-        .fleet()
-        .agent_actions(&ActionOptions::default())
-        .await
-        .unwrap();
-    assert_eq!(actions.items[0].nb_agents_failed, 1);
-    assert_eq!(actions.items[0].latest_errors[0]["agentId"], "failed-agent");
-    assert_eq!(actions.items[0].extra["future_detail"], "retained");
-    let key = client.fleet().enrollment_key("key-id").await.unwrap();
-    assert_eq!(key.api_key, "do-not-log-this-key");
-    assert!(!format!("{key:?}").contains(&key.api_key));
-    assert_eq!(
-        client
-            .fleet()
-            .download_agent_file("file/id", "diagnostics file.zip")
-            .await
-            .unwrap()
-            .bytes()
-            .await
-            .unwrap()
-            .as_ref(),
-        &[80, 75, 3, 4, 0, 255]
-    );
-    task.abort();
+    proxy.json(json!({}));
+    client.status().send().await.unwrap();
+    proxy.take().route("GET", "/api/status", &[]);
 }

@@ -11,11 +11,15 @@ default = []
 demo = ["dep:axum", "dep:tokio", "dep:tracing-subscriber"]
 
 [dependencies]
+base64 = "0.22"
 bytes = "1"
 futures-util = "0.3"
-reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "query", "multipart", "stream"] }
+http = "1"
+percent-encoding = "2"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "multipart", "stream"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_urlencoded = "0.7"
 thiserror = "2"
 url = "2"
 axum = { version = "0.8", optional = true }
@@ -24,6 +28,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = tr
 
 [dev-dependencies]
 axum = "0.8"
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
 uuid = { version = "1", features = ["v4"] }
 

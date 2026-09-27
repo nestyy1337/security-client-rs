@@ -1,23 +1,13 @@
 [
   {
-    "wrapper": "cases.comment",
+    "wrapper": "cases.add_comment",
     "method": "POST",
     "path": "/api/cases/{caseId}/comments",
     "operation_id": "addCaseCommentDefaultSpace",
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-cases",
-    "notes": "User-text comments only, no alert attachments."
-  },
-  {
-    "wrapper": "cases.comments",
-    "method": "GET",
-    "path": "/api/cases/{caseId}/comments/_find",
-    "operation_id": "findCaseCommentsDefaultSpace",
-    "scope": "Space",
-    "contract": "partial",
-    "evidence": "live-cases",
-    "notes": "Page and page size only; response remains JSON."
+    "notes": "Typed free-text comments; alert and other attachments only as caller-supplied JSON. Returns the updated case."
   },
   {
     "wrapper": "cases.create",
@@ -27,7 +17,7 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-cases",
-    "notes": "Basic case fields, connector and syncAlerts; no assignee or custom-field creation type."
+    "notes": "Typed severity, tags, connector and syncAlerts; assignees, category and custom fields only as caller-supplied JSON."
   },
   {
     "wrapper": "cases.delete",
@@ -47,7 +37,17 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-cases",
-    "notes": "Page, page size, owner and search only."
+    "notes": "Page, page size, owners, search, status, severity, tags and sorting; no assignee, reporter, category or date-range filters."
+  },
+  {
+    "wrapper": "cases.find_comments",
+    "method": "GET",
+    "path": "/api/cases/{caseId}/comments/_find",
+    "operation_id": "findCaseCommentsDefaultSpace",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-cases",
+    "notes": "Page, page size and sort order; comments remain JSON."
   },
   {
     "wrapper": "cases.get",
@@ -67,7 +67,7 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-cases",
-    "notes": "Versioned title, status and severity patches only."
+    "notes": "Versioned status, title, description, severity and tag patches; other fields not modeled."
   },
   {
     "wrapper": "client.status",
@@ -140,6 +140,46 @@
     "notes": "Streaming NDJSON with namespace and expired-item selection. Value-list contents excluded."
   },
   {
+    "wrapper": "exceptions.find_items",
+    "method": "GET",
+    "path": "/api/exception_lists/items/_find",
+    "operation_id": "FindExceptionListItems",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "One list per call; pagination, filter, search and sorting, no multi-list option. Upstream scalar parsing does not support literal commas in list IDs/filters."
+  },
+  {
+    "wrapper": "exceptions.find_lists",
+    "method": "GET",
+    "path": "/api/exception_lists/_find",
+    "operation_id": "FindExceptionLists",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Namespace, explicit pagination, filter and sorting."
+  },
+  {
+    "wrapper": "exceptions.get_item",
+    "method": "GET",
+    "path": "/api/exception_lists/items",
+    "operation_id": "ReadExceptionListItem",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Core fields and extensible response; full contract parity not audited."
+  },
+  {
+    "wrapper": "exceptions.get_list",
+    "method": "GET",
+    "path": "/api/exception_lists",
+    "operation_id": "ReadExceptionList",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Core fields and extensible response; full contract parity not audited."
+  },
+  {
     "wrapper": "exceptions.import_lists",
     "method": "POST",
     "path": "/api/exception_lists/_import",
@@ -150,46 +190,6 @@
     "notes": "Multipart NDJSON with overwrite/as_new_list options; preserves HTTP-200 partial failures. Value-list contents excluded."
   },
   {
-    "wrapper": "exceptions.item",
-    "method": "GET",
-    "path": "/api/exception_lists/items",
-    "operation_id": "ReadExceptionListItem",
-    "scope": "Space",
-    "contract": "unreviewed",
-    "evidence": null,
-    "notes": "Core fields and extensible response; full contract parity not audited."
-  },
-  {
-    "wrapper": "exceptions.items",
-    "method": "GET",
-    "path": "/api/exception_lists/items/_find",
-    "operation_id": "FindExceptionListItems",
-    "scope": "Space",
-    "contract": "partial",
-    "evidence": null,
-    "notes": "One list and namespace per call; pagination/filter/sorting, no multi-list or search option. Upstream scalar parsing does not support literal commas in list IDs/filters."
-  },
-  {
-    "wrapper": "exceptions.list",
-    "method": "GET",
-    "path": "/api/exception_lists",
-    "operation_id": "ReadExceptionList",
-    "scope": "Space",
-    "contract": "unreviewed",
-    "evidence": null,
-    "notes": "Core fields and extensible response; full contract parity not audited."
-  },
-  {
-    "wrapper": "exceptions.lists",
-    "method": "GET",
-    "path": "/api/exception_lists/_find",
-    "operation_id": "FindExceptionLists",
-    "scope": "Space",
-    "contract": "partial",
-    "evidence": null,
-    "notes": "One namespace per call; explicit pagination, filter and sorting."
-  },
-  {
     "wrapper": "exceptions.summary",
     "method": "GET",
     "path": "/api/exception_lists/summary",
@@ -197,7 +197,7 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": null,
-    "notes": "JSON OS summary; optional filter not exposed. Upstream can report total=0 when no items have os_types; use items().total for item counts."
+    "notes": "JSON OS summary with optional filter. Upstream can report total=0 when no items have os_types; use find_items().total for item counts."
   },
   {
     "wrapper": "exceptions.update_item",
@@ -220,17 +220,7 @@
     "notes": "Explicit optimistic concurrency token; replaces modeled fields, not a patch."
   },
   {
-    "wrapper": "fleet.agent",
-    "method": "GET",
-    "path": "/api/fleet/agents/{agentId}",
-    "operation_id": "get-fleet-agents-agentid",
-    "scope": "Space",
-    "contract": "unreviewed",
-    "evidence": null,
-    "notes": "Core fields plus extensible JSON; real-agent state and policy acknowledgment are exercised by deployment tests."
-  },
-  {
-    "wrapper": "fleet.agent_actions",
+    "wrapper": "fleet.agent_action_status",
     "method": "GET",
     "path": "/api/fleet/agents/action_status",
     "operation_id": "get-fleet-agents-action-status",
@@ -238,26 +228,6 @@
     "contract": "partial",
     "evidence": null,
     "notes": "Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. No automatic polling."
-  },
-  {
-    "wrapper": "fleet.agent_policies",
-    "method": "GET",
-    "path": "/api/fleet/agent_policies",
-    "operation_id": "get-fleet-agent-policies",
-    "scope": "Space",
-    "contract": "partial",
-    "evidence": "live-fleet",
-    "notes": "Page, page size and kuery; requests full policies and agent counts."
-  },
-  {
-    "wrapper": "fleet.agent_policy",
-    "method": "GET",
-    "path": "/api/fleet/agent_policies/{agentPolicyId}",
-    "operation_id": "get-fleet-agent-policies-agentpolicyid",
-    "scope": "Space",
-    "contract": "unreviewed",
-    "evidence": "live-fleet",
-    "notes": "Core policy fields plus extensible JSON."
   },
   {
     "wrapper": "fleet.agent_status",
@@ -270,26 +240,6 @@
     "notes": "JSON status summary; historical operation-level evidence used an empty fleet."
   },
   {
-    "wrapper": "fleet.agent_uploads",
-    "method": "GET",
-    "path": "/api/fleet/agents/{agentId}/uploads",
-    "operation_id": "get-fleet-agents-agentid-uploads",
-    "scope": "Space",
-    "contract": "partial",
-    "evidence": null,
-    "notes": "Typed status, action ID and file metadata; caller correlates readiness before download."
-  },
-  {
-    "wrapper": "fleet.agents",
-    "method": "GET",
-    "path": "/api/fleet/agents",
-    "operation_id": "get-fleet-agents",
-    "scope": "Space",
-    "contract": "partial",
-    "evidence": "live-fleet",
-    "notes": "Page, page size and kuery only; historical operation-level evidence used an empty fleet."
-  },
-  {
     "wrapper": "fleet.bulk_reassign_agents",
     "method": "POST",
     "path": "/api/fleet/agents/bulk_reassign",
@@ -297,7 +247,7 @@
     "scope": "Space",
     "contract": "unreviewed",
     "evidence": null,
-    "notes": "Core fields and extensible response; full contract parity not audited."
+    "notes": "ID/KQL selection, dryRun, batchSize and includeInactive; typed action or dry-run result."
   },
   {
     "wrapper": "fleet.bulk_request_agent_diagnostics",
@@ -317,7 +267,7 @@
     "scope": "Space",
     "contract": "unreviewed",
     "evidence": null,
-    "notes": "Core fields and extensible response; full contract parity not audited."
+    "notes": "ID/KQL selection, dryRun, batchSize, includeInactive, force and revoke; typed action or dry-run result."
   },
   {
     "wrapper": "fleet.bulk_update_agent_tags",
@@ -327,7 +277,7 @@
     "scope": "Space",
     "contract": "unreviewed",
     "evidence": null,
-    "notes": "Core fields and extensible response; full contract parity not audited."
+    "notes": "ID/KQL selection, tags to add or remove, dryRun, batchSize and includeInactive; typed action or dry-run result."
   },
   {
     "wrapper": "fleet.bulk_upgrade_agents",
@@ -357,7 +307,7 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-fleet",
-    "notes": "New name only; additional copy options not exposed."
+    "notes": "New name and description."
   },
   {
     "wrapper": "fleet.create_agent_policy",
@@ -367,7 +317,7 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-fleet",
-    "notes": "Name, namespace, description, monitoring, output and inactivity options only."
+    "notes": "Typed name, namespace, description, monitoring, output and inactivity settings plus sys_monitoring; other settings only as caller-supplied JSON."
   },
   {
     "wrapper": "fleet.create_enrollment_key",
@@ -397,7 +347,7 @@
     "scope": "Space",
     "contract": "unreviewed",
     "evidence": "live-fleet",
-    "notes": "Policy-ID deletion; no full contract audit."
+    "notes": "Policy-ID deletion with optional force; no full contract audit."
   },
   {
     "wrapper": "fleet.delete_package_policy",
@@ -407,7 +357,7 @@
     "scope": "Space",
     "contract": "unreviewed",
     "evidence": "live-fleet",
-    "notes": "Single package-policy deletion, JSON result."
+    "notes": "Single package-policy deletion with optional force, JSON result."
   },
   {
     "wrapper": "fleet.download_agent_file",
@@ -427,20 +377,30 @@
     "scope": "Space",
     "contract": "unreviewed",
     "evidence": "live-fleet",
-    "notes": "Streaming policy response; alternate download options not audited."
+    "notes": "Checked raw YAML response with standalone and Kubernetes options; download and revision options not exposed."
   },
   {
-    "wrapper": "fleet.enrollment_key",
+    "wrapper": "fleet.find_agent_policies",
     "method": "GET",
-    "path": "/api/fleet/enrollment_api_keys/{keyId}",
-    "operation_id": "get-fleet-enrollment-api-keys-keyid",
+    "path": "/api/fleet/agent_policies",
+    "operation_id": "get-fleet-agent-policies",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
-    "notes": "Runtime item envelope; credential is redacted in Debug. Selected fields only."
+    "evidence": "live-fleet",
+    "notes": "Page, page size, KQL and sorting; requests full policies and agent counts by default. No format or upgradeable filters."
   },
   {
-    "wrapper": "fleet.enrollment_keys",
+    "wrapper": "fleet.find_agents",
+    "method": "GET",
+    "path": "/api/fleet/agents",
+    "operation_id": "get-fleet-agents",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-fleet",
+    "notes": "Page, page size, KQL, inactive agents and sorting; no metrics, status summary or point-in-time paging. Historical operation-level evidence used an empty fleet."
+  },
+  {
+    "wrapper": "fleet.find_enrollment_keys",
     "method": "GET",
     "path": "/api/fleet/enrollment_api_keys",
     "operation_id": "get-fleet-enrollment-api-keys",
@@ -450,17 +410,47 @@
     "notes": "Explicit pagination and KQL; deprecated duplicate list field omitted. Credentials redacted in Debug."
   },
   {
-    "wrapper": "fleet.install_integration",
-    "method": "POST",
-    "path": "/api/fleet/epm/packages/{pkgName}/{pkgVersion}",
-    "operation_id": "post-fleet-epm-packages-pkgname-pkgversion",
+    "wrapper": "fleet.find_package_policies",
+    "method": "GET",
+    "path": "/api/fleet/package_policies",
+    "operation_id": "get-fleet-package-policies",
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-fleet",
-    "notes": "Default installation options only, JSON asset result."
+    "notes": "Page, page size, KQL and sorting; no format or agent-count options."
   },
   {
-    "wrapper": "fleet.integration",
+    "wrapper": "fleet.get_agent",
+    "method": "GET",
+    "path": "/api/fleet/agents/{agentId}",
+    "operation_id": "get-fleet-agents-agentid",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": null,
+    "notes": "Core fields plus extensible JSON; real-agent state and policy acknowledgment are exercised by deployment tests."
+  },
+  {
+    "wrapper": "fleet.get_agent_policy",
+    "method": "GET",
+    "path": "/api/fleet/agent_policies/{agentPolicyId}",
+    "operation_id": "get-fleet-agent-policies-agentpolicyid",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-fleet",
+    "notes": "Core policy fields plus extensible JSON."
+  },
+  {
+    "wrapper": "fleet.get_enrollment_key",
+    "method": "GET",
+    "path": "/api/fleet/enrollment_api_keys/{keyId}",
+    "operation_id": "get-fleet-enrollment-api-keys-keyid",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Runtime item envelope; credential is redacted in Debug. Selected fields only."
+  },
+  {
+    "wrapper": "fleet.get_package",
     "method": "GET",
     "path": "/api/fleet/epm/packages/{pkgName}/{pkgVersion}",
     "operation_id": "get-fleet-epm-packages-pkgname-pkgversion",
@@ -470,17 +460,37 @@
     "notes": "Exact package name/version; core fields plus extensible JSON."
   },
   {
-    "wrapper": "fleet.integrations",
+    "wrapper": "fleet.get_package_policy",
     "method": "GET",
-    "path": "/api/fleet/epm/packages",
-    "operation_id": "get-fleet-epm-packages",
+    "path": "/api/fleet/package_policies/{packagePolicyId}",
+    "operation_id": "get-fleet-package-policies-packagepolicyid",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-fleet",
+    "notes": "Core fields plus extensible JSON; inputs remain JSON."
+  },
+  {
+    "wrapper": "fleet.install_package",
+    "method": "POST",
+    "path": "/api/fleet/epm/packages/{pkgName}/{pkgVersion}",
+    "operation_id": "post-fleet-epm-packages-pkgname-pkgversion",
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-fleet",
-    "notes": "Default package catalogue, no catalogue filters exposed."
+    "notes": "Force and ignore_constraints options; query options not exposed. JSON asset result."
   },
   {
-    "wrapper": "fleet.outputs",
+    "wrapper": "fleet.list_agent_uploads",
+    "method": "GET",
+    "path": "/api/fleet/agents/{agentId}/uploads",
+    "operation_id": "get-fleet-agents-agentid-uploads",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": null,
+    "notes": "Typed status, action ID and file metadata; caller correlates readiness before download."
+  },
+  {
+    "wrapper": "fleet.list_outputs",
     "method": "GET",
     "path": "/api/fleet/outputs",
     "operation_id": "get-fleet-outputs",
@@ -490,24 +500,14 @@
     "notes": "Default output listing as JSON; not output management."
   },
   {
-    "wrapper": "fleet.package_policies",
+    "wrapper": "fleet.list_packages",
     "method": "GET",
-    "path": "/api/fleet/package_policies",
-    "operation_id": "get-fleet-package-policies",
+    "path": "/api/fleet/epm/packages",
+    "operation_id": "get-fleet-epm-packages",
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-fleet",
-    "notes": "Page, page size and kuery only."
-  },
-  {
-    "wrapper": "fleet.package_policy",
-    "method": "GET",
-    "path": "/api/fleet/package_policies/{packagePolicyId}",
-    "operation_id": "get-fleet-package-policies-packagepolicyid",
-    "scope": "Space",
-    "contract": "unreviewed",
-    "evidence": "live-fleet",
-    "notes": "Core fields plus extensible JSON; inputs remain JSON."
+    "notes": "Category and prerelease filters; other catalogue options not exposed."
   },
   {
     "wrapper": "fleet.reassign_agent",
@@ -557,17 +557,17 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": null,
-    "notes": "Default unenrollment options only; the deployment suite currently exercises bulk unenrollment."
+    "notes": "Force and revoke options; the deployment suite currently exercises bulk unenrollment."
   },
   {
-    "wrapper": "fleet.uninstall_integration",
+    "wrapper": "fleet.uninstall_package",
     "method": "DELETE",
     "path": "/api/fleet/epm/packages/{pkgName}/{pkgVersion}",
     "operation_id": "delete-fleet-epm-packages-pkgname-pkgversion",
     "scope": "Space",
     "contract": "unreviewed",
     "evidence": null,
-    "notes": "Default removal request; deployment tests remove the owned integration after unenrollment."
+    "notes": "Optional force; deployment tests remove the owned integration after unenrollment."
   },
   {
     "wrapper": "fleet.update_agent_policy",
@@ -577,7 +577,7 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-fleet",
-    "notes": "Same limited policy settings as creation."
+    "notes": "Same typed policy settings as creation; other settings only as caller-supplied JSON."
   },
   {
     "wrapper": "fleet.update_package_policy",
@@ -617,7 +617,7 @@
     "scope": "Global",
     "contract": "partial",
     "evidence": "live-roles-spaces",
-    "notes": "Kibana privileges and JSON Elasticsearch privileges; additional metadata discarded."
+    "notes": "Kibana privileges, JSON Elasticsearch privileges, description and metadata; read-only fields kept separately."
   },
   {
     "wrapper": "roles.list",
@@ -627,7 +627,7 @@
     "scope": "Global",
     "contract": "partial",
     "evidence": "live-roles-spaces",
-    "notes": "Kibana privileges and JSON Elasticsearch privileges; additional metadata discarded."
+    "notes": "Kibana privileges, JSON Elasticsearch privileges, description and metadata; read-only fields kept separately."
   },
   {
     "wrapper": "roles.put",
@@ -637,7 +637,17 @@
     "scope": "Global",
     "contract": "partial",
     "evidence": "live-roles-spaces",
-    "notes": "Kibana and Elasticsearch privileges; other role settings not modeled."
+    "notes": "Kibana and Elasticsearch privileges, description, metadata and createOnly; other settings only as caller-supplied JSON."
+  },
+  {
+    "wrapper": "security.create_alerts_index",
+    "method": "POST",
+    "path": "/api/detection_engine/index",
+    "operation_id": "CreateAlertsIndex",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-rules",
+    "notes": "Alert-index initialization only; not detection execution."
   },
   {
     "wrapper": "security.create_rule",
@@ -647,7 +657,7 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-rules",
-    "notes": "KQL/Lucene query rules and exception-list associations; other rule types and advanced settings lack creation types."
+    "notes": "Typed KQL/Lucene query rules with exception-list associations; other rule types only as caller-supplied JSON."
   },
   {
     "wrapper": "security.delete_rule",
@@ -667,7 +677,27 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-rules",
-    "notes": "Explicit rule_id selection, streaming NDJSON; additional export options not exposed."
+    "notes": "Optional rule_id selection, exclude_export_details and file_name; raw NDJSON response."
+  },
+  {
+    "wrapper": "security.find_rules",
+    "method": "GET",
+    "path": "/api/detection_engine/rules/_find",
+    "operation_id": "FindRules",
+    "scope": "Space",
+    "contract": "partial",
+    "evidence": "live-rules",
+    "notes": "Page, page size, filter and sorting; no field selection or gap filters."
+  },
+  {
+    "wrapper": "security.get_rule",
+    "method": "GET",
+    "path": "/api/detection_engine/rules",
+    "operation_id": "ReadRule",
+    "scope": "Space",
+    "contract": "unreviewed",
+    "evidence": "live-rules",
+    "notes": "ID or rule_id lookup; response has core fields and an extensible JSON map."
   },
   {
     "wrapper": "security.import_rules",
@@ -677,17 +707,17 @@
     "scope": "Space",
     "contract": "partial",
     "evidence": "live-rules",
-    "notes": "Multipart NDJSON and overwrite only; HTTP-200 partial failures retained as JSON."
+    "notes": "Multipart NDJSON with overwrite, exception, connector and new-list options; HTTP-200 partial failures retained."
   },
   {
-    "wrapper": "security.initialize",
-    "method": "POST",
-    "path": "/api/detection_engine/index",
-    "operation_id": "CreateAlertsIndex",
+    "wrapper": "security.patch_rule",
+    "method": "PATCH",
+    "path": "/api/detection_engine/rules",
+    "operation_id": "PatchRule",
     "scope": "Space",
-    "contract": "unreviewed",
+    "contract": "partial",
     "evidence": "live-rules",
-    "notes": "Alert-index initialization only; not detection execution."
+    "notes": "Typed common fields and exception-list replacement; any other field through PatchRule::field."
   },
   {
     "wrapper": "security.privileges",
@@ -700,36 +730,6 @@
     "notes": "JSON privilege response; exercised only as administrator in the live suite."
   },
   {
-    "wrapper": "security.rule",
-    "method": "GET",
-    "path": "/api/detection_engine/rules",
-    "operation_id": "ReadRule",
-    "scope": "Space",
-    "contract": "unreviewed",
-    "evidence": "live-rules",
-    "notes": "ID or rule_id lookup; response has core fields and an extensible JSON map."
-  },
-  {
-    "wrapper": "security.rules",
-    "method": "GET",
-    "path": "/api/detection_engine/rules/_find",
-    "operation_id": "FindRules",
-    "scope": "Space",
-    "contract": "partial",
-    "evidence": "live-rules",
-    "notes": "Page, page size and filter exposed; other search options not modeled."
-  },
-  {
-    "wrapper": "security.update_rule",
-    "method": "PATCH",
-    "path": "/api/detection_engine/rules",
-    "operation_id": "PatchRule",
-    "scope": "Space",
-    "contract": "partial",
-    "evidence": "live-rules",
-    "notes": "Common fields plus replacement of exception-list associations; other advanced fields not modeled."
-  },
-  {
     "wrapper": "spaces.create",
     "method": "POST",
     "path": "/api/spaces/space",
@@ -737,7 +737,7 @@
     "scope": "Global",
     "contract": "partial",
     "evidence": "live-roles-spaces",
-    "notes": "ID, name, description and disabled features only."
+    "notes": "Typed ID, name, description and disabled features; other fields kept in an extensible map."
   },
   {
     "wrapper": "spaces.delete",
@@ -757,7 +757,7 @@
     "scope": "Global",
     "contract": "partial",
     "evidence": "live-roles-spaces",
-    "notes": "ID, name, description and disabled features only; additional fields discarded."
+    "notes": "Typed ID, name, description and disabled features; other fields kept in an extensible map."
   },
   {
     "wrapper": "spaces.list",
@@ -767,7 +767,7 @@
     "scope": "Global",
     "contract": "partial",
     "evidence": "live-roles-spaces",
-    "notes": "Core space fields only; no optional listing parameters."
+    "notes": "Same space fields as get; no optional listing parameters."
   },
   {
     "wrapper": "spaces.update",
@@ -777,6 +777,6 @@
     "scope": "Global",
     "contract": "partial",
     "evidence": "live-roles-spaces",
-    "notes": "Same limited fields as creation."
+    "notes": "Same fields as creation; extensible fields are sent back unchanged."
   }
 ]
