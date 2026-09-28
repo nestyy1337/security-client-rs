@@ -11,6 +11,11 @@ keywords = ["kibana", "elastic", "siem", "security", "fleet"]
 categories = ["api-bindings", "web-programming::http-client"]
 include = ["/src/**/*.rs", "/examples/**/*.rs", "/tests/*.rs", "/tests/common/*.rs", "/README.md", "/CHANGELOG.md", "/LICENSE-APACHE", "/LICENSE-MIT"]
 
+[features]
+default = []
+# Debug events per request; see the README.
+tracing = ["dep:tracing"]
+
 [workspace]
 members = ["demo"]
 
@@ -26,11 +31,13 @@ serde_json = "1"
 serde_urlencoded = "0.7"
 thiserror = "2"
 tokio = { version = "1", features = ["time"] }
+tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
 url = "2"
 
 [dev-dependencies]
 axum = "0.8"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 serde_json = "1"
+tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "fs", "io-util"] }
 uuid = { version = "1", features = ["v4"] }

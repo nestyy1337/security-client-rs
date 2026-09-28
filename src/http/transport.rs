@@ -315,6 +315,49 @@ impl Transport {
     where
         Q: Serialize + ?Sized,
     {
+        self.send_named("request", method, path, headers, query, body, timeout)
+            .await
+    }
+
+    /// [`send`](Self::send) for a named endpoint, which labels its trace events.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn send_named<Q>(
+        &self,
+        operation: &'static str,
+        method: Method,
+        path: &str,
+        headers: HeaderMap,
+        query: Option<&Q>,
+        body: Option<Body>,
+        timeout: Option<Duration>,
+    ) -> Result<Response>
+    where
+        Q: Serialize + ?Sized,
+    {
+        #[cfg(feature = "tracing")]
+        let trace =
+            super::trace::Request::start(operation, &method, path, &headers, &self.inner.headers);
+        let result = self
+            .dispatch(method, path, headers, query, body, timeout)
+            .await
+            .map(|response| response.named(operation));
+        #[cfg(feature = "tracing")]
+        trace.finish(&result);
+        result
+    }
+
+    async fn dispatch<Q>(
+        &self,
+        method: Method,
+        path: &str,
+        headers: HeaderMap,
+        query: Option<&Q>,
+        body: Option<Body>,
+        timeout: Option<Duration>,
+    ) -> Result<Response>
+    where
+        Q: Serialize + ?Sized,
+    {
         let mut request = self
             .inner
             .client

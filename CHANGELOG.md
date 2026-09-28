@@ -14,3 +14,4 @@ Initial release.
 - `pages()` and `items()` streams on paginated builders.
 - `Fleet::wait_for_action`, `wait_for_upload` and `wait_for_agent_policy` with deadlines.
 - `Error::message` and `Error::retry_after` for error responses.
+- Optional `tracing` feature with a debug event per request.

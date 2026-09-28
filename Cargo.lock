@@ -643,6 +643,8 @@ dependencies = [
  "serde_urlencoded",
  "thiserror",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "url",
  "uuid",
 ]

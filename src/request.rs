@@ -44,6 +44,7 @@ pub struct Request<'a> {
     body: Option<Payload>,
     timeout: Option<Duration>,
     error: Option<Arc<Error>>,
+    operation: &'static str,
 }
 
 #[derive(Clone)]
@@ -71,6 +72,7 @@ impl<'a> Request<'a> {
             body: None,
             timeout: None,
             error,
+            operation: "request",
         }
     }
 
@@ -163,6 +165,12 @@ impl<'a> Request<'a> {
         self
     }
 
+    /// Labels the request with its endpoint name for trace events.
+    pub(crate) fn named(mut self, operation: &'static str) -> Self {
+        self.operation = operation;
+        self
+    }
+
     pub(crate) async fn send_as<T>(self) -> Result<Response<T>> {
         if let Some(error) = self.error {
             // A clone shares the deferred error; only the last owner gets the original.
@@ -177,7 +185,8 @@ impl<'a> Request<'a> {
         let query = (!self.query.is_empty()).then_some(&self.query);
         let response = self
             .transport
-            .send(
+            .send_named(
+                self.operation,
                 self.method,
                 &self.path,
                 self.headers,
@@ -253,7 +262,7 @@ macro_rules! endpoint {
             }
 
             pub async fn send(self) -> $crate::Result<$crate::http::Response<$output>> {
-                self.0.send_as().await
+                self.0.named(stringify!($name)).send_as().await
             }
         }
     };
