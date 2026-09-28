@@ -403,3 +403,103 @@ async fn an_explicit_proxy_receives_requests_for_the_kibana_host() {
     client.status().send().await.unwrap();
     proxy.take().route("GET", "/api/status", &[]);
 }
+
+#[tokio::test]
+async fn backslashes_in_identifiers_cannot_change_the_route() {
+    let mock = Mock::start().await;
+    mock.json(json!({}));
+    let _ = mock
+        .soc()
+        .cases()
+        .get(r"..\..\..\api\security\role")
+        .send()
+        .await;
+    mock.take().route(
+        "GET",
+        "/s/soc/api/cases/..%5C..%5C..%5Capi%5Csecurity%5Crole",
+        &[],
+    );
+    let raw = mock
+        .client()
+        .transport()
+        .send::<()>(
+            Method::GET,
+            r"/api\..\status",
+            HeaderMap::new(),
+            None,
+            None,
+            None,
+        )
+        .await;
+    assert!(matches!(raw.unwrap_err(), Error::InvalidRequest(_)));
+    assert_eq!(mock.request_count(), 0);
+}
+
+#[tokio::test]
+async fn debug_output_omits_proxy_passwords_query_values_and_bodies() {
+    let builder = transport("http://localhost")
+        .proxy(Url::parse("http://proxy-user:proxy-secret@proxy.invalid:3128").unwrap())
+        .header(
+            HeaderName::from_static("x-api-token"),
+            HeaderValue::from_static("header-secret"),
+        );
+    let debug = format!("{builder:?}");
+    assert!(
+        !debug.contains("proxy-secret")
+            && !debug.contains("proxy-user")
+            && !debug.contains("header-secret"),
+        "{debug}"
+    );
+    assert!(debug.contains("x-api-token"), "{debug}");
+
+    let mock = Mock::start().await;
+    let client = mock.client();
+    let request = client
+        .request(Method::GET, Scope::Global, &["api", "x"])
+        .query(&[("token", "query-secret")]);
+    let debug = format!("{request:?}");
+    assert!(
+        debug.contains("token") && !debug.contains("query-secret"),
+        "{debug}"
+    );
+
+    mock.reply(403, r#"{"message":"body-secret"}"#);
+    let error = client.status().send().await.unwrap_err();
+    assert!(!format!("{error:?}").contains("body-secret"));
+    assert_eq!(error.message().as_deref(), Some("body-secret"));
+}
+
+#[tokio::test]
+async fn an_interrupted_error_body_keeps_status_headers_and_partial_body() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = [0; 4096];
+        let _ = socket.read(&mut buffer).await.unwrap();
+        socket
+            .write_all(b"HTTP/1.1 429 Too Many Requests\r\nretry-after: 3\r\ncontent-length: 100\r\n\r\npartial")
+            .await
+            .unwrap();
+    });
+    let client = Kibana::new(Transport::single_node(&url).unwrap());
+    match client.status().send().await.unwrap_err() {
+        Error::Api {
+            status,
+            headers,
+            body,
+            truncated,
+            body_error,
+            ..
+        } => {
+            assert_eq!(status, StatusCode::TOO_MANY_REQUESTS);
+            assert_eq!(headers["retry-after"], "3");
+            assert_eq!(body, "partial");
+            assert!(!truncated);
+            assert!(body_error.is_some());
+        }
+        other => panic!("wrong error: {other:?}"),
+    }
+    server.await.unwrap();
+}

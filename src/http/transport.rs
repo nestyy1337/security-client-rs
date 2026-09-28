@@ -12,8 +12,10 @@ use http::{
 use serde::Serialize;
 use url::Url;
 
-use super::{Body, Response, body::Content, response::read_bounded};
-use crate::{Error, Result};
+use futures_util::StreamExt;
+
+use super::{Body, Response, body::Content};
+use crate::{Error, Result, TransportError};
 
 /// The address used by [`Transport::single_node`] examples and local development stacks.
 pub const DEFAULT_ADDRESS: &str = "http://localhost:5601";
@@ -88,7 +90,6 @@ impl fmt::Debug for Certificate {
     }
 }
 
-#[derive(Debug)]
 enum Proxy {
     System,
     Disabled,
@@ -97,7 +98,8 @@ enum Proxy {
 
 /// Configures a [`Transport`]. Requests have a 60 second timeout, a 10 second
 /// connect timeout and a 32 MiB response limit unless changed here.
-#[derive(Debug)]
+///
+/// `Debug` output omits credentials, header values and proxy passwords.
 pub struct TransportBuilder {
     url: Url,
     credentials: Option<Credentials>,
@@ -238,6 +240,31 @@ impl TransportBuilder {
     }
 }
 
+impl fmt::Debug for TransportBuilder {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let proxy = match &self.proxy {
+            Proxy::System => "system".to_owned(),
+            Proxy::Disabled => "disabled".to_owned(),
+            Proxy::Url(url) => {
+                let mut url = url.clone();
+                let _ = url.set_username("");
+                let _ = url.set_password(None);
+                url.to_string()
+            }
+        };
+        f.debug_struct("TransportBuilder")
+            .field("url", &self.url.as_str())
+            .field("credentials", &self.credentials)
+            .field("headers", &self.headers.keys().collect::<Vec<_>>())
+            .field("timeout", &self.timeout)
+            .field("connect_timeout", &self.connect_timeout)
+            .field("certificates", &self.certificates.len())
+            .field("proxy", &proxy)
+            .field("response_limit", &self.response_limit)
+            .finish()
+    }
+}
+
 struct Inner {
     client: reqwest::Client,
     url: Url,
@@ -309,21 +336,22 @@ impl Transport {
         let status = response.status();
         if !status.is_success() {
             let headers = Box::new(response.headers().clone());
-            let (body, truncated) = read_bounded(response, ERROR_LIMIT).await?;
+            let (body, truncated, body_error) = read_error_body(response).await;
             return Err(Error::Api {
                 status,
                 headers,
                 body: String::from_utf8_lossy(&body).into_owned(),
                 truncated,
+                body_error,
             });
         }
         Ok(Response::new(response, self.inner.response_limit))
     }
 
     fn endpoint<Q: Serialize + ?Sized>(&self, path: &str, query: Option<&Q>) -> Result<Url> {
-        if path.contains(['?', '#']) {
+        if path.contains(['?', '#', '\\']) {
             return Err(Error::InvalidRequest(
-                "path must not contain a query or fragment".into(),
+                "path must not contain a query, fragment or backslash".into(),
             ));
         }
         let mut url = self.inner.url.clone();
@@ -349,6 +377,25 @@ impl fmt::Debug for Transport {
             .field("url", &self.inner.url.as_str())
             .finish_non_exhaustive()
     }
+}
+
+/// Reads at most [`ERROR_LIMIT`] bytes of an error body. A failure while reading
+/// keeps the bytes received so far, so the status and headers are not lost.
+async fn read_error_body(response: reqwest::Response) -> (Vec<u8>, bool, Option<TransportError>) {
+    let mut stream = response.bytes_stream();
+    let mut body = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(chunk) => chunk,
+            Err(error) => return (body, false, Some(TransportError::from(error))),
+        };
+        let remaining = ERROR_LIMIT.saturating_sub(body.len());
+        body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+        if chunk.len() > remaining {
+            return (body, true, None);
+        }
+    }
+    (body, false, None)
 }
 
 /// A Cloud ID is `name:base64(host[:port]$elasticsearch-id$kibana-id)`.

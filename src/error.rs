@@ -5,8 +5,9 @@ use http::{HeaderMap, StatusCode};
 pub type Result<T> = std::result::Result<T, Error>;
 
 /// Error responses retain their status, headers, and a bounded body.
-/// Bodies may contain operational data; do not log them indiscriminately.
-#[derive(Debug, thiserror::Error)]
+/// Bodies may contain operational data, so neither `Display` nor `Debug`
+/// prints them; read [`Error::body`] deliberately.
+#[derive(thiserror::Error)]
 #[non_exhaustive]
 pub enum Error {
     #[error("invalid client configuration: {0}")]
@@ -16,11 +17,17 @@ pub enum Error {
     #[error("HTTP transport failed: {0}")]
     Transport(#[source] TransportError),
     #[error("Kibana returned HTTP {status}")]
+    #[non_exhaustive]
     Api {
         status: StatusCode,
         headers: Box<HeaderMap>,
+        /// At most 16 KiB of the response body.
         body: String,
+        /// The body was longer than the retained part.
         truncated: bool,
+        /// Reading the body failed after the status and headers arrived;
+        /// `body` holds what was received.
+        body_error: Option<TransportError>,
     },
     #[error("could not decode Kibana response with HTTP {status}: {source}")]
     Decode {
@@ -66,11 +73,62 @@ impl Error {
 
 impl From<reqwest::Error> for Error {
     fn from(error: reqwest::Error) -> Self {
-        Self::Transport(TransportError(error))
+        Self::Transport(TransportError::from(error))
     }
 }
 
-/// A connection, TLS, timeout, or body-streaming failure. No HTTP status is available.
+impl fmt::Debug for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Configuration(message) => f.debug_tuple("Configuration").field(message).finish(),
+            Self::InvalidRequest(message) => {
+                f.debug_tuple("InvalidRequest").field(message).finish()
+            }
+            Self::Transport(error) => f.debug_tuple("Transport").field(error).finish(),
+            Self::Api {
+                status,
+                headers,
+                body,
+                truncated,
+                body_error,
+            } => f
+                .debug_struct("Api")
+                .field("status", status)
+                .field("headers", &headers.keys().collect::<Vec<_>>())
+                .field("body_bytes", &body.len())
+                .field("truncated", truncated)
+                .field("body_error", body_error)
+                .finish(),
+            Self::Decode {
+                status,
+                body,
+                source,
+            } => f
+                .debug_struct("Decode")
+                .field("status", status)
+                .field("body_bytes", &body.len())
+                .field("source", source)
+                .finish(),
+            Self::ResponseTooLarge { limit } => f
+                .debug_struct("ResponseTooLarge")
+                .field("limit", limit)
+                .finish(),
+            Self::Serialize(error) => f.debug_tuple("Serialize").field(error).finish(),
+        }
+    }
+}
+
+/// Query values can carry filters or tokens, so they are dropped from the retained URL.
+impl From<reqwest::Error> for TransportError {
+    fn from(mut error: reqwest::Error) -> Self {
+        if let Some(url) = error.url_mut() {
+            url.set_query(None);
+        }
+        Self(error)
+    }
+}
+
+/// A connection, TLS, timeout, or body-streaming failure.
 pub struct TransportError(reqwest::Error);
 
 impl TransportError {
