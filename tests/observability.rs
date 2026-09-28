@@ -89,6 +89,18 @@ async fn requests_are_traced_without_secrets() {
         .await
         .unwrap();
 
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let closed = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let unreachable = Kibana::new(kibana_rs::http::Transport::single_node(&closed).unwrap());
+    let _ = unreachable
+        .cases()
+        .find()
+        .search("search-secret")
+        .send()
+        .await;
+    let _ = client.cases().get("..").send().await;
+
     let output = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
     let lines: Vec<&str> = output.lines().collect();
     let completed = lines

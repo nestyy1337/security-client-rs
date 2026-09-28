@@ -505,3 +505,112 @@ async fn an_interrupted_error_body_keeps_status_headers_and_partial_body() {
     }
     server.await.unwrap();
 }
+
+/// A throwaway self-signed CA used only to check certificate parsing.
+const TEST_CA: &str = "-----BEGIN CERTIFICATE-----
+MIIBjzCCATWgAwIBAgIUWvDoZB2tpC0JKr+pfEsfke1uo0YwCgYIKoZIzj0EAwIw
+HDEaMBgGA1UEAwwRa2liYW5hLXJzIHRlc3QgQ0EwIBcNMjYwOTI4MjMzMzUzWhgP
+MjEyNjA5MDQyMzMzNTNaMBwxGjAYBgNVBAMMEWtpYmFuYS1ycyB0ZXN0IENBMFkw
+EwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAENlfzDO8MU/3qtiElHVLHegUbQXCfw96m
+0z+rVeSfENTTPzEDUJj1DLYN9auvsAVhdmH5d3KgL8EG3H64cbSdSqNTMFEwHQYD
+VR0OBBYEFGJQMhr6hhaZwVKU5TLD4Sh+xDscMB8GA1UdIwQYMBaAFGJQMhr6hhaZ
+wVKU5TLD4Sh+xDscMA8GA1UdEwEB/wQFMAMBAf8wCgYIKoZIzj0EAwIDSAAwRQIg
+WNe2dl/GLMFkOFT/MMkZvM1tSs/clK5OtefTJdd1MGkCIQCdXyI/ESqHQjOyl7+n
+85hBYPg9Ll+f9pd1oz9J/OGlWw==
+-----END CERTIFICATE-----
+";
+
+#[test]
+fn certificates_must_contain_a_usable_certificate() {
+    use base64::Engine;
+    use kibana_rs::http::Certificate;
+    let with_root = |certificate: Certificate| {
+        transport("https://localhost")
+            .root_certificate(certificate)
+            .build()
+    };
+
+    assert!(with_root(Certificate::from_pem(TEST_CA.as_bytes()).unwrap()).is_ok());
+    let bundle = format!("{TEST_CA}{TEST_CA}");
+    assert!(
+        with_root(Certificate::from_pem(bundle.as_bytes()).unwrap()).is_ok(),
+        "bundles are accepted"
+    );
+    for invalid in [
+        &b""[..],
+        b"garbage",
+        b"-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n",
+    ] {
+        assert!(
+            matches!(Certificate::from_pem(invalid), Err(Error::Configuration(_))),
+            "{}",
+            String::from_utf8_lossy(invalid)
+        );
+    }
+
+    let body: String = TEST_CA
+        .lines()
+        .filter(|line| !line.starts_with("-----"))
+        .collect();
+    let der = base64::engine::general_purpose::STANDARD
+        .decode(body)
+        .unwrap();
+    assert!(with_root(Certificate::from_der(&der).unwrap()).is_ok());
+    let invalid_der = Certificate::from_der(b"not DER").unwrap();
+    assert!(matches!(
+        with_root(invalid_der),
+        Err(Error::Configuration(_))
+    ));
+}
+
+#[tokio::test]
+async fn transport_default_headers_merge_and_later_values_replace_earlier_ones() {
+    let mock = Mock::start().await;
+    let mut first = HeaderMap::new();
+    first.insert("x-team", HeaderValue::from_static("blue"));
+    first.insert("x-region", HeaderValue::from_static("eu"));
+    let mut second = HeaderMap::new();
+    second.insert("x-team", HeaderValue::from_static("red"));
+    let client = Kibana::new(
+        transport(&mock.url)
+            .headers(first)
+            .headers(second)
+            .build()
+            .unwrap(),
+    );
+    mock.json(json!({}));
+    client.status().send().await.unwrap();
+    let request = mock.take();
+    assert_eq!(request.header("x-team"), Some("red"));
+    assert_eq!(request.header("x-region"), Some("eu"));
+    assert_eq!(
+        request.header("kbn-xsrf"),
+        Some("kibana-rs"),
+        "built-in defaults stay"
+    );
+}
+
+#[tokio::test]
+async fn transport_errors_do_not_reveal_query_values() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let closed = format!("http://{}", listener.local_addr().unwrap());
+    drop(listener);
+    let error = Kibana::new(Transport::single_node(&closed).unwrap())
+        .request(Method::GET, Scope::Global, &["api", "x"])
+        .query(&[("token", "query-secret")])
+        .send()
+        .await
+        .unwrap_err();
+    let Error::Transport(transport_error) = &error else {
+        panic!("expected a transport error, got {error:?}");
+    };
+    assert!(transport_error.is_connect());
+    assert!(std::error::Error::source(transport_error).is_some());
+    for text in [
+        error.to_string(),
+        format!("{error:?}"),
+        transport_error.to_string(),
+    ] {
+        assert!(!text.contains("query-secret"), "{text}");
+    }
+}
