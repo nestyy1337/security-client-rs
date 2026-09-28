@@ -23,6 +23,7 @@ pub enum Raw {}
 pub struct Response<T = Value> {
     inner: reqwest::Response,
     limit: usize,
+    operation: &'static str,
     kind: PhantomData<fn() -> T>,
 }
 
@@ -31,12 +32,23 @@ impl<T> Response<T> {
         Self {
             inner,
             limit,
+            operation: "request",
             kind: PhantomData,
         }
     }
 
+    pub(crate) fn named(mut self, operation: &'static str) -> Self {
+        self.operation = operation;
+        self
+    }
+
     pub(crate) fn cast<U>(self) -> Response<U> {
-        Response::new(self.inner, self.limit)
+        Response {
+            inner: self.inner,
+            limit: self.limit,
+            operation: self.operation,
+            kind: PhantomData,
+        }
     }
 
     pub fn status_code(&self) -> StatusCode {
@@ -78,12 +90,20 @@ impl<T> Response<T> {
     /// Decodes the body into a type other than the endpoint's default.
     pub async fn json_as<U: DeserializeOwned>(self) -> Result<U> {
         let status = self.status_code();
+        #[cfg(feature = "tracing")]
+        let operation = self.operation;
         let body = self.bytes().await?;
-        serde_json::from_slice(&body).map_err(|source| Error::Decode {
-            status,
-            body: String::from_utf8_lossy(&body[..body.len().min(super::transport::ERROR_LIMIT)])
+        serde_json::from_slice(&body).map_err(|source| {
+            #[cfg(feature = "tracing")]
+            super::trace::decode_failed(operation, status, &source);
+            Error::Decode {
+                status,
+                body: String::from_utf8_lossy(
+                    &body[..body.len().min(super::transport::ERROR_LIMIT)],
+                )
                 .into_owned(),
-            source,
+                source,
+            }
         })
     }
 }

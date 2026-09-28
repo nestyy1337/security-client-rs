@@ -87,6 +87,14 @@ The client does not retry, because whether a retry is safe depends on the reques
 
 [examples/recovery.rs](examples/recovery.rs) implements these patterns. [examples/pagination.rs](examples/pagination.rs) and [examples/transfer.rs](examples/transfer.rs) show collection streams and export and import with partial failures.
 
+## Tracing
+
+The optional `tracing` feature emits one debug event per request under the `kibana_rs` target, with the endpoint name, method, path, status, duration and any `X-Opaque-Id` header, plus an event when a response does not match the expected type. Query values, bodies, credentials and other headers are never recorded.
+
+```toml
+kibana-rs = { git = "https://github.com/nestyy1337/security-client-rs", features = ["tracing"] }
+```
+
 ## Compatibility
 
 Tested against self-managed Kibana 9.5 and 9.4 with a Basic license. 8.x, Serverless, Elastic Cloud and paid features are not tested. The declared minimum Rust version is 1.88.
@@ -94,7 +102,7 @@ Tested against self-managed Kibana 9.5 and 9.4 with a Basic license. 8.x, Server
 ## Development
 
 ```sh
-cargo test --workspace --all-targets
+cargo test --workspace --all-targets --all-features
 ```
 
 Offline tests check every builder's method, path, query and body against a recording mock server. Live tests run against disposable Elastic Stack deployments; see [tests/deployment](tests/deployment/README.md). The [coverage report](docs/api-coverage.md) is generated and checked by `tools/api_coverage.py`; see [coverage](coverage/README.md).

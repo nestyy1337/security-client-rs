@@ -3,6 +3,8 @@
 //! [`Method`], [`StatusCode`] and the [`headers`] types come from the `http` crate.
 mod body;
 mod response;
+#[cfg(feature = "tracing")]
+mod trace;
 mod transport;
 
 pub use body::Body;
