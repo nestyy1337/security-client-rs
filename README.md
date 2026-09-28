@@ -1,28 +1,35 @@
 # kibana-rs
 
-An async Rust client for Kibana security operations and Fleet management. A separate, unpublished [browser workbench](demo/README.md) demonstrates the crate against a real Kibana instance.
+An async Rust client for the Kibana HTTP API, focused on security operations: detection rules, exception lists, cases, Fleet, spaces and roles.
 
-The initial implementation targets traditional Kibana 9.x. It is an independent project, not an Elastic-supported client. It has not been published to crates.io.
+The project is pre-release and not yet published on crates.io. It is not affiliated with or supported by Elastic.
 
-## API coverage and compatibility
+## Coverage
 
 <!-- BEGIN API COVERAGE -->
-Against the pinned traditional **9.5.4** bundle: **78/663 named operations** (11.8% endpoint breadth), **45 recorded exercises** on 9.5.4, and **no release-certified deployment profiles**. Recorded evidence is STALE for the current client/test inputs. Full contract parity remains unaudited.
+78 of the 663 operations in the Kibana 9.5.4 OpenAPI bundle have named builders. See the [coverage report](docs/api-coverage.md) for each builder's route and known limits.
 <!-- END API COVERAGE -->
 
-The [operation report](docs/api-coverage.md) lists every wrapper's official operation ID, contract limitations and recorded test evidence. The [coverage tracker](coverage/README.md) checks the report against a checksum-pinned upstream API bundle and the Rust source. CI does not equate a wrapper with complete parameter or response support.
+| Namespace | Endpoints |
+| --- | --- |
+| `security()` | Detection rules: find, get, create, patch, delete, import, export; privileges; alert index setup |
+| `exceptions()` | Exception lists and items: CRUD, search, summary, duplicate, import, export |
+| `cases()` | Cases: find, get, create, update, delete; comments |
+| `fleet()` | Agent and package policies, packages, enrollment keys, agents, bulk agent actions, diagnostics, action status, outputs |
+| `spaces()` | Space CRUD |
+| `roles()` | Role CRUD |
 
-The [deployment suite](tests/deployment/README.md) runs ten required scenarios against disposable **9.5.4** and **9.4.7** profiles, including a real Fleet Server and two managed Agents. Images and signed packages are checksum-locked. GitHub Actions retains per-profile results and logs. These selected workflows are separate from full API contract parity and packaged-release certification. The older operation-level evidence above remains a historical record.
+Routes without a named builder are reachable through `Kibana::request`.
 
-## Library
-
-Use the local package as a dependency until it is published:
+## Installation
 
 ```toml
 [dependencies]
-kibana-rs = { path = "../kibana-rs" }
+kibana-rs = { git = "https://github.com/nestyy1337/security-client-rs" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
+
+## Usage
 
 ```rust
 use kibana_rs::{
@@ -31,109 +38,59 @@ use kibana_rs::{
     security::{QueryRule, Severity},
 };
 
-async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    let transport = TransportBuilder::new(Url::parse(&std::env::var("KIBANA_URL")?)?)
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let transport = TransportBuilder::new(Url::parse("https://kibana.example:5601")?)
         .auth(Credentials::EncodedApiKey(std::env::var("KIBANA_API_KEY")?))
         .build()?;
     let client = Kibana::new(transport).space("soc")?;
 
     let rules = client.security().find_rules().per_page(100).send().await?.json().await?;
-    let policies = client.fleet().find_agent_policies().send().await?.json().await?;
-    println!("{} rules, {} agent policies", rules.total, policies.total);
+    println!("{} rules", rules.total);
 
-    let request = QueryRule::new(
-        "Failed authentication",
-        "Review failed authentication events",
-        "event.category: authentication and event.outcome: failure",
-    )
-    .severity(Severity::High);
-    let rule = client.security().create_rule(&request).send().await?.json().await?;
-    assert!(!rule.enabled);
+    let rule = QueryRule::new("Failed logins", "Repeated authentication failures", "event.outcome: failure")
+        .severity(Severity::High);
+    let created = client.security().create_rule(&rule).send().await?.json().await?;
+    println!("created disabled rule {}", created.rule_id);
     Ok(())
 }
 ```
 
-The executable [security example](examples/security.rs) only reads rules and policies. Run it with `nix develop -c cargo run --example security`, supplying `KIBANA_URL`, `KIBANA_SPACE`, and either `KIBANA_API_KEY` or `KIBANA_USERNAME`/`KIBANA_PASSWORD`.
+A [runnable example](examples/security.rs) reads rules and agent policies.
 
-### Structure
+## How the client works
 
-The layout follows the official [Elasticsearch Rust client](https://github.com/elastic/elasticsearch-rs):
+- `http::Transport` holds the connection pool, credentials, default headers, timeouts, trusted roots, proxy and response size limit. `Transport::cloud` connects with an Elastic Cloud ID.
+- Namespace methods on `Kibana` return one builder per endpoint. Required parameters are arguments; optional ones are setters. Every builder also has `header()` and `request_timeout()`.
+- `send()` returns `Response<T>`, and `json()` decodes into the endpoint's type. `text()`, `bytes()`, `bytes_stream()` and `json_as::<U>()` are always available. Exports and downloads return `Response<Raw>`.
+- Create and replace endpoints accept any `Serialize` body, so rule types and fields without a typed builder can be sent as JSON.
+- Non-success statuses become `Error::Api`, which keeps the status, headers and up to 16 KiB of body. `Error::message()` returns Kibana's error message.
 
-- `http::Transport` owns the connection pool, credentials, default headers, timeouts, TLS roots, proxy and response limit. `TransportBuilder` configures it; `Transport::cloud` resolves the Kibana endpoint from an Elastic Cloud ID. `Transport::send` is the single path every request takes.
-- `Kibana` wraps a transport and an optional space. Namespace methods (`security()`, `cases()`, `exceptions()`, `fleet()`, `spaces()`, `roles()`) return endpoint builders.
-- Each endpoint is its own builder type. Required path and body parameters are method arguments; optional parameters are setters. Every builder has `header()` and `request_timeout()` for per-request overrides and `send()`, which returns `Response<T>`.
-- `Response<T>::json()` decodes into the endpoint's type. `json_as::<U>()`, `text()`, `bytes()` and `bytes_stream()` are always available. Endpoints without a body use `Response<Empty>`; NDJSON exports, YAML policies and diagnostic archives use `Response<Raw>`, which has no `json()`.
-- Request bodies such as `QueryRule`, `NewCase`, `NewList` and `NewAgentPolicy` are builders. Create and replace endpoints accept any `Serialize` value, so rule types or fields without a typed builder can be sent as JSON.
-- Response structs and the `Error` enum are `#[non_exhaustive]`. Most responses keep unmodeled fields in an `extra` map.
-- reqwest is an implementation detail. Public HTTP types come from the `http` and `url` crates.
+## Behavior to know
 
-One deliberate difference from the Elasticsearch client: `send()` turns non-success statuses into `Error::Api` instead of returning them for the caller to check. A forgotten status check there turns a 403 into a confusing decode error.
+- Requests are never retried and redirects are never followed. A mutation interrupted by a timeout or connection failure may or may not have been applied.
+- `Kibana::space` scopes space-aware routes to `/s/{space}`. Space, role and status routes are always global.
+- `find_*` methods return one page and a total. Fleet collections count pages from 1; Fleet action status counts from 0.
+- Cases and exception lists use optimistic concurrency. Pass the latest `version` or `_version`; stale values fail with HTTP 409.
+- Rule and exception imports report per-object failures inside an HTTP 200 response.
+- Fleet wraps single resources as `{"item": ...}`, so those endpoints decode into `Item<T>`.
 
-### Coverage
+## Compatibility
 
-See the [generated inventory](docs/api-coverage.md) for current counts and per-operation limitations. Every named endpoint has an offline wire-contract test that asserts its method, path, query and body against a recording mock; the coverage checker fails when one is missing.
+Tested against self-managed Kibana 9.5 and 9.4 with a Basic license. 8.x, Serverless, Elastic Cloud and paid features are not tested. The declared minimum Rust version is 1.88.
 
-| Namespace | Included |
-| --- | --- |
-| `security()` | Query-rule creation, find/get/patch/delete, rule import/export, privilege inspection, alert-index initialization |
-| `cases()` | Find/get/create/update/delete, comments, optimistic concurrency through case versions |
-| `exceptions()` | List/item CRUD and search; typed conditions; optimistic concurrency; duplicate/import/export and OS summaries |
-| `fleet()` | Policies and packages; enrollment keys; individual/bulk agent operations; upgrades, diagnostics, action history and binary downloads; status and output listing |
-| `spaces()` | Global space CRUD/list |
-| `roles()` | Global role list/get/put/delete with Kibana privileges |
-
-Stable resource fields have Rust types. Integration input variables and Elasticsearch privilege definitions remain JSON because their schemas depend on the package or Elasticsearch. Query-rule creation supports KQL and Lucene. Other detection-rule types can be read, patched through `PatchRule::field`, imported/exported, or created from JSON.
-
-Pagination is explicit. `find_*` methods return one page and a total. Do not interpret the first page as the complete collection.
-
-### Exceptions and agent operations
-
-`client.exceptions()` manages detection exception lists and items. Entries support match, match-any, exists, wildcard, value-list references and nested conditions. `NamespaceType::Single` isolates lists to the selected Kibana space; `Agnostic` shares them across spaces. `update_list` and `update_item` require the opaque `_version` token from the last read, separately from the optional user-defined numeric version.
-
-Attach `list.reference()` through `QueryRule::exceptions_list` or `PatchRule::exceptions_list`. Patching this array replaces all associations, so preserve the references you want to keep. An empty array detaches every list. Exception import preserves per-object errors even on HTTP 200. Export requires both the saved-object ID and `list_id`, provided by `ListReference`. Imports can regenerate saved-object IDs; read back by `list_id`/`item_id` before reusing references. Referenced value-list contents need separate management and are not included in exports. Kibana's OS summary can report zero without OS-labelled items; `find_items().total` is the item count.
-
-Fleet bulk methods accept explicit IDs or a KQL query through `AgentSelection`. `dry_run(true)` returns the selected count. Dry runs do not validate every agent's eligibility. Actual submissions return an action ID; inspect `agent_action_status()` for completion, failure counts and sampled errors, then verify the agent state. Action-history pages start at zero; collection pages start at one. Fleet wraps single resources as `{"item": ...}`, so those endpoints decode into `Item<T>`.
-
-Enrollment keys support policy selection, names, expiry, listing and revocation. Their `Debug` output redacts credentials. Revoking an enrollment key does not unenroll existing agents. Diagnostics requests are asynchronous: correlate the action ID with `list_agent_uploads()`, wait for `READY`, then download with `download_agent_file()`. Diagnostic archives can contain sensitive configuration.
-
-Upgrade and cancellation methods have wire-contract tests, but the container fixture cannot prove a successful binary upgrade. Cancellation applies to upgrades and unenrollment, not arbitrary actions. Scheduled upgrade behavior and successful cancellation need a service-installed Agent and the relevant license profile. See the [contract research](research/fleet-agent-operations.md) and [deployment test limits](tests/deployment/README.md).
-
-### Request behavior
-
-- API key (encoded or ID/secret), Basic and Bearer credentials; additional root certificates; transport-wide and per-request headers and timeouts; explicit or disabled proxies. Proxy environment variables are honored unless `disable_proxy()` is set.
-- Space selection shares the connection pool. Global routes remain global. URL construction preserves reverse-proxy base paths and percent-encodes each path segment separately.
-- No automatic redirects or retries. An interrupted mutation can have an unknown outcome and must be reconciled by the caller.
-- `json()`, `bytes()` and `text()` stop at a configurable 32 MiB limit; `bytes_stream()` is unbounded. Errors retain HTTP status, headers, and at most 16 KiB of body; `Error::message()` extracts Kibana's `message` field. Error bodies may contain operational data and are kept out of `Display`.
-- Invalid path segments and body serialization failures are reported by `send()` before any request is made.
-- `Kibana::request(method, scope, segments)` builds a request to any route without a named builder. `Transport::send` accepts a pre-encoded path for full control.
-
-Date-based `elastic-api-version` headers can be set on the transport or per request when a deployment or endpoint requires one. No blanket Serverless compatibility is claimed.
-
-## Verification
-
-Run local checks through the pinned Nix environment:
+## Development
 
 ```sh
-nix develop -c cargo fmt --all -- --check
-nix develop -c cargo clippy --locked --workspace --all-targets -- -D warnings
-nix develop -c cargo test --locked --workspace --all-targets
+cargo test --workspace --all-targets
 ```
 
-Run the full deployment suite, including provisioning, seeding, assertions and cleanup:
+Offline tests check every builder's method, path, query and body against a recording mock server. Live tests run against disposable Elastic Stack deployments; see [tests/deployment](tests/deployment/README.md). The [coverage report](docs/api-coverage.md) is generated and checked by `tools/api_coverage.py`; see [coverage](coverage/README.md).
 
-```sh
-nix develop -c uv run python -u tests/deployment/run.py --profile 9.5.4-basic
-nix develop -c uv run python -u tests/deployment/run.py --profile 9.4.7-basic
-```
+A Nix flake provides the toolchain for those who use it.
 
-The runner requires Docker on Linux x86_64 and creates its own deployment. It verifies TLS, Basic/API-key permissions, security/case/Fleet lifecycles, pagination, real policy delivery, log ingestion and detection alerts. Every named test must run; ignored or zero-test results fail. Fresh volumes isolate each run. See the [suite documentation](tests/deployment/README.md) for requirements, profiles and artifact locations. Ordinary Cargo tests intentionally ignore these deployment scenarios.
+## License
 
-The [Check workflow](.github/workflows/check.yml) runs formatting, linting, transport and runner tests, and API coverage checks. The [deployment workflow](.github/workflows/deployments.yml) runs both deployment profiles on main pushes, pull requests, manual dispatch and weekly. See [verification evidence](docs/verification.md) for historical demo results and the [workbench documentation](demo/README.md) for browser checks, which do not replace crate deployment tests.
+Licensed under either the [Apache License 2.0](LICENSE-APACHE) or the [MIT license](LICENSE-MIT), at your option.
 
-## Compatibility limits
-
-The initial deployment matrix covers selected workflows on fresh self-managed 9.5.4 and 9.4.7 installations with Basic licensing. It does not cover 8.x, Serverless, Cloud Hosted, deployment upgrades, paid features, mixed-version agents, ARM or Fleet-managed binary upgrades. A release still needs verification against its packaged source and minimum Rust version. EQL/threshold rule builders, value-list storage management, Endpoint artifact-specific validation, response actions, generic alerting, connectors, data views, and saved-object transfer remain outside this implementation. The raw request API is available for those cases.
-
-The [API investigation](research/api-feasibility.md) and [existing-client survey](research/existing-clients.md) preserve the pre-implementation findings. This code is handwritten; no upstream OpenAPI bundle, server source, or generated binding was copied into the crate. The initial research's future scope is superseded by this security/Fleet-first release.
-
-Code is available under MIT or Apache-2.0. Kibana and Elasticsearch are Elastic trademarks; this project is not affiliated with Elastic.
+Kibana and Elasticsearch are trademarks of Elasticsearch B.V.

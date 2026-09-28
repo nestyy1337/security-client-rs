@@ -6,7 +6,6 @@
     "operation_id": "addCaseCommentDefaultSpace",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-cases",
     "notes": "Typed free-text comments; alert and other attachments only as caller-supplied JSON. Returns the updated case."
   },
   {
@@ -16,7 +15,6 @@
     "operation_id": "createCaseDefaultSpace",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-cases",
     "notes": "Typed severity, tags, connector and syncAlerts; assignees, category and custom fields only as caller-supplied JSON."
   },
   {
@@ -26,7 +24,6 @@
     "operation_id": "deleteCaseDefaultSpace",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-cases",
     "notes": "ID-list deletion; no full contract audit."
   },
   {
@@ -36,7 +33,6 @@
     "operation_id": "findCasesDefaultSpace",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-cases",
     "notes": "Page, page size, owners, search, status, severity, tags and sorting; no assignee, reporter, category or date-range filters."
   },
   {
@@ -46,7 +42,6 @@
     "operation_id": "findCaseCommentsDefaultSpace",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-cases",
     "notes": "Page, page size and sort order; comments remain JSON."
   },
   {
@@ -56,7 +51,6 @@
     "operation_id": "getCaseDefaultSpace",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-cases",
     "notes": "Core case fields and extensible JSON response."
   },
   {
@@ -66,7 +60,6 @@
     "operation_id": "updateCaseDefaultSpace",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-cases",
     "notes": "Versioned status, title, description, severity and tag patches; other fields not modeled."
   },
   {
@@ -76,7 +69,6 @@
     "operation_id": "get-status",
     "scope": "Global",
     "contract": "unreviewed",
-    "evidence": "browser",
     "notes": "JSON status response; completeness not audited."
   },
   {
@@ -86,7 +78,6 @@
     "operation_id": "CreateExceptionListItem",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Typed match, match_any, exists, wildcard, value-list reference and nested entries, plus OS types; Endpoint artifact validation deferred."
   },
   {
@@ -96,7 +87,6 @@
     "operation_id": "CreateExceptionList",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Detection list fields, OS types and user-defined version; Endpoint artifact constraints not validated by the client."
   },
   {
@@ -106,7 +96,6 @@
     "operation_id": "DeleteExceptionListItem",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": null,
     "notes": "Core fields and extensible response; full contract parity not audited."
   },
   {
@@ -116,7 +105,6 @@
     "operation_id": "DeleteExceptionList",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": null,
     "notes": "Core fields and extensible response; full contract parity not audited."
   },
   {
@@ -126,7 +114,6 @@
     "operation_id": "DuplicateExceptionList",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "List ID, namespace and expired-item selection; response retains extra fields."
   },
   {
@@ -136,7 +123,6 @@
     "operation_id": "ExportExceptionList",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Streaming NDJSON with namespace and expired-item selection. Value-list contents excluded."
   },
   {
@@ -146,7 +132,6 @@
     "operation_id": "FindExceptionListItems",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "One list per call; pagination, filter, search and sorting, no multi-list option. Upstream scalar parsing does not support literal commas in list IDs/filters."
   },
   {
@@ -156,7 +141,6 @@
     "operation_id": "FindExceptionLists",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Namespace, explicit pagination, filter and sorting."
   },
   {
@@ -166,7 +150,6 @@
     "operation_id": "ReadExceptionListItem",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": null,
     "notes": "Core fields and extensible response; full contract parity not audited."
   },
   {
@@ -176,7 +159,6 @@
     "operation_id": "ReadExceptionList",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": null,
     "notes": "Core fields and extensible response; full contract parity not audited."
   },
   {
@@ -186,7 +168,6 @@
     "operation_id": "ImportExceptionList",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Multipart NDJSON with overwrite/as_new_list options; preserves HTTP-200 partial failures. Value-list contents excluded."
   },
   {
@@ -196,7 +177,6 @@
     "operation_id": "ReadExceptionListSummary",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "JSON OS summary with optional filter. Upstream can report total=0 when no items have os_types; use find_items().total for item counts."
   },
   {
@@ -206,7 +186,6 @@
     "operation_id": "UpdateExceptionListItem",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Explicit optimistic concurrency token; replaces modeled fields. Endpoint artifact validation deferred."
   },
   {
@@ -216,7 +195,6 @@
     "operation_id": "UpdateExceptionList",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Explicit optimistic concurrency token; replaces modeled fields, not a patch."
   },
   {
@@ -226,7 +204,6 @@
     "operation_id": "get-fleet-agents-action-status",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. No automatic polling."
   },
   {
@@ -236,8 +213,7 @@
     "operation_id": "get-fleet-agent-status",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-fleet",
-    "notes": "JSON status summary; historical operation-level evidence used an empty fleet."
+    "notes": "JSON status summary."
   },
   {
     "wrapper": "fleet.bulk_reassign_agents",
@@ -246,7 +222,6 @@
     "operation_id": "post-fleet-agents-bulk-reassign",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": null,
     "notes": "ID/KQL selection, dryRun, batchSize and includeInactive; typed action or dry-run result."
   },
   {
@@ -256,7 +231,6 @@
     "operation_id": "post-fleet-agents-bulk-request-diagnostics",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "ID/KQL selection, dryRun, batchSize and CPU metric; no includeInactive contract."
   },
   {
@@ -266,7 +240,6 @@
     "operation_id": "post-fleet-agents-bulk-unenroll",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": null,
     "notes": "ID/KQL selection, dryRun, batchSize, includeInactive, force and revoke; typed action or dry-run result."
   },
   {
@@ -276,7 +249,6 @@
     "operation_id": "post-fleet-agents-bulk-update-agent-tags",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": null,
     "notes": "ID/KQL selection, tags to add or remove, dryRun, batchSize and includeInactive; typed action or dry-run result."
   },
   {
@@ -286,8 +258,7 @@
     "operation_id": "post-fleet-agents-bulk-upgrade",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
-    "notes": "Typed selection, dry-run and rollout options; acceptance/count distinguished. No successful binary-upgrade fixture."
+    "notes": "Typed selection, dry-run and rollout options; acceptance and dry-run count distinguished."
   },
   {
     "wrapper": "fleet.cancel_agent_action",
@@ -296,8 +267,7 @@
     "operation_id": "post-fleet-agents-actions-actionid-cancel",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
-    "notes": "JSON runtime response; cancellation supported for upgrade/unenroll only. Wire-tested, no successful cancellation fixture."
+    "notes": "JSON response; Kibana cancels upgrade and unenrollment actions only."
   },
   {
     "wrapper": "fleet.copy_agent_policy",
@@ -306,7 +276,6 @@
     "operation_id": "post-fleet-agent-policies-agentpolicyid-copy",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-fleet",
     "notes": "New name and description."
   },
   {
@@ -316,7 +285,6 @@
     "operation_id": "post-fleet-agent-policies",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-fleet",
     "notes": "Typed name, namespace, description, monitoring, output and inactivity settings plus sys_monitoring; other settings only as caller-supplied JSON."
   },
   {
@@ -326,7 +294,6 @@
     "operation_id": "post-fleet-enrollment-api-keys",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Policy, name and expiration; credential redacted in Debug. Selected response fields only."
   },
   {
@@ -336,7 +303,6 @@
     "operation_id": "post-fleet-package-policies",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-fleet",
     "notes": "Simplified inputs with JSON vars; selected top-level fields only."
   },
   {
@@ -346,7 +312,6 @@
     "operation_id": "post-fleet-agent-policies-delete",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-fleet",
     "notes": "Policy-ID deletion with optional force; no full contract audit."
   },
   {
@@ -356,7 +321,6 @@
     "operation_id": "delete-fleet-package-policies-packagepolicyid",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-fleet",
     "notes": "Single package-policy deletion with optional force, JSON result."
   },
   {
@@ -366,7 +330,6 @@
     "operation_id": "get-fleet-agents-files-fileid-filename",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Checked streaming binary response, despite the upstream JSON success schema."
   },
   {
@@ -376,7 +339,6 @@
     "operation_id": "get-fleet-agent-policies-agentpolicyid-download",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-fleet",
     "notes": "Checked raw YAML response with standalone and Kubernetes options; download and revision options not exposed."
   },
   {
@@ -386,7 +348,6 @@
     "operation_id": "get-fleet-agent-policies",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-fleet",
     "notes": "Page, page size, KQL and sorting; requests full policies and agent counts by default. No format or upgradeable filters."
   },
   {
@@ -396,7 +357,6 @@
     "operation_id": "get-fleet-agents",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-fleet",
     "notes": "Page, page size, KQL, inactive agents and sorting; no metrics, status summary or point-in-time paging. Historical operation-level evidence used an empty fleet."
   },
   {
@@ -406,7 +366,6 @@
     "operation_id": "get-fleet-enrollment-api-keys",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Explicit pagination and KQL; deprecated duplicate list field omitted. Credentials redacted in Debug."
   },
   {
@@ -416,7 +375,6 @@
     "operation_id": "get-fleet-package-policies",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-fleet",
     "notes": "Page, page size, KQL and sorting; no format or agent-count options."
   },
   {
@@ -426,8 +384,7 @@
     "operation_id": "get-fleet-agents-agentid",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": null,
-    "notes": "Core fields plus extensible JSON; real-agent state and policy acknowledgment are exercised by deployment tests."
+    "notes": "Core fields plus extensible JSON."
   },
   {
     "wrapper": "fleet.get_agent_policy",
@@ -436,7 +393,6 @@
     "operation_id": "get-fleet-agent-policies-agentpolicyid",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-fleet",
     "notes": "Core policy fields plus extensible JSON."
   },
   {
@@ -446,7 +402,6 @@
     "operation_id": "get-fleet-enrollment-api-keys-keyid",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Runtime item envelope; credential is redacted in Debug. Selected fields only."
   },
   {
@@ -456,7 +411,6 @@
     "operation_id": "get-fleet-epm-packages-pkgname-pkgversion",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-fleet",
     "notes": "Exact package name/version; core fields plus extensible JSON."
   },
   {
@@ -466,7 +420,6 @@
     "operation_id": "get-fleet-package-policies-packagepolicyid",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-fleet",
     "notes": "Core fields plus extensible JSON; inputs remain JSON."
   },
   {
@@ -476,7 +429,6 @@
     "operation_id": "post-fleet-epm-packages-pkgname-pkgversion",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-fleet",
     "notes": "Force and ignore_constraints options; query options not exposed. JSON asset result."
   },
   {
@@ -486,7 +438,6 @@
     "operation_id": "get-fleet-agents-agentid-uploads",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Typed status, action ID and file metadata; caller correlates readiness before download."
   },
   {
@@ -496,7 +447,6 @@
     "operation_id": "get-fleet-outputs",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-fleet",
     "notes": "Default output listing as JSON; not output management."
   },
   {
@@ -506,7 +456,6 @@
     "operation_id": "get-fleet-epm-packages",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-fleet",
     "notes": "Category and prerelease filters; other catalogue options not exposed."
   },
   {
@@ -516,8 +465,7 @@
     "operation_id": "post-fleet-agents-agentid-reassign",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": null,
-    "notes": "Policy-ID reassignment request; deployment tests verify the agent's policy and revision acknowledgment."
+    "notes": "Policy-ID reassignment; JSON acknowledgment."
   },
   {
     "wrapper": "fleet.request_agent_diagnostics",
@@ -526,7 +474,6 @@
     "operation_id": "post-fleet-agents-agentid-request-diagnostics",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Optional CPU metrics; asynchronous action result, follow upload readiness before download."
   },
   {
@@ -536,7 +483,6 @@
     "operation_id": "delete-fleet-enrollment-api-keys-keyid",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
     "notes": "Default revocation only; 9.5-only forceDelete/includeHidden options omitted for 9.4 compatibility."
   },
   {
@@ -546,7 +492,6 @@
     "operation_id": "post-fleet-setup",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-fleet",
     "notes": "Published in the bundle under Fleet internals; do not infer a stable lifecycle from documentation."
   },
   {
@@ -556,8 +501,7 @@
     "operation_id": "post-fleet-agents-agentid-unenroll",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
-    "notes": "Force and revoke options; the deployment suite currently exercises bulk unenrollment."
+    "notes": "Force and revoke options."
   },
   {
     "wrapper": "fleet.uninstall_package",
@@ -566,8 +510,7 @@
     "operation_id": "delete-fleet-epm-packages-pkgname-pkgversion",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": null,
-    "notes": "Optional force; deployment tests remove the owned integration after unenrollment."
+    "notes": "Optional force; JSON result."
   },
   {
     "wrapper": "fleet.update_agent_policy",
@@ -576,7 +519,6 @@
     "operation_id": "put-fleet-agent-policies-agentpolicyid",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-fleet",
     "notes": "Same typed policy settings as creation; other settings only as caller-supplied JSON."
   },
   {
@@ -586,7 +528,6 @@
     "operation_id": "put-fleet-package-policies-packagepolicyid",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-fleet",
     "notes": "Simplified input format and selected fields only."
   },
   {
@@ -596,8 +537,7 @@
     "operation_id": "post-fleet-agents-agentid-upgrade",
     "scope": "Space",
     "contract": "partial",
-    "evidence": null,
-    "notes": "Typed request; JSON acknowledgment only. Successful binary upgrades require a service-installed Agent; container rejection is not upgrade certification."
+    "notes": "Typed request; JSON acknowledgment only. Container agents cannot be upgraded through Fleet."
   },
   {
     "wrapper": "roles.delete",
@@ -606,7 +546,6 @@
     "operation_id": "delete-security-role-name",
     "scope": "Global",
     "contract": "unreviewed",
-    "evidence": "live-roles-spaces",
     "notes": "Single global role deletion; no full contract audit."
   },
   {
@@ -616,7 +555,6 @@
     "operation_id": "get-security-role-name",
     "scope": "Global",
     "contract": "partial",
-    "evidence": "live-roles-spaces",
     "notes": "Kibana privileges, JSON Elasticsearch privileges, description and metadata; read-only fields kept separately."
   },
   {
@@ -626,7 +564,6 @@
     "operation_id": "get-security-role",
     "scope": "Global",
     "contract": "partial",
-    "evidence": "live-roles-spaces",
     "notes": "Kibana privileges, JSON Elasticsearch privileges, description and metadata; read-only fields kept separately."
   },
   {
@@ -636,7 +573,6 @@
     "operation_id": "put-security-role-name",
     "scope": "Global",
     "contract": "partial",
-    "evidence": "live-roles-spaces",
     "notes": "Kibana and Elasticsearch privileges, description, metadata and createOnly; other settings only as caller-supplied JSON."
   },
   {
@@ -646,7 +582,6 @@
     "operation_id": "CreateAlertsIndex",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-rules",
     "notes": "Alert-index initialization only; not detection execution."
   },
   {
@@ -656,7 +591,6 @@
     "operation_id": "CreateRule",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-rules",
     "notes": "Typed KQL/Lucene query rules with exception-list associations; other rule types only as caller-supplied JSON."
   },
   {
@@ -666,7 +600,6 @@
     "operation_id": "DeleteRule",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-rules",
     "notes": "ID or rule_id lookup; complete deletion contract not audited."
   },
   {
@@ -676,7 +609,6 @@
     "operation_id": "ExportRules",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-rules",
     "notes": "Optional rule_id selection, exclude_export_details and file_name; raw NDJSON response."
   },
   {
@@ -686,7 +618,6 @@
     "operation_id": "FindRules",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-rules",
     "notes": "Page, page size, filter and sorting; no field selection or gap filters."
   },
   {
@@ -696,7 +627,6 @@
     "operation_id": "ReadRule",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-rules",
     "notes": "ID or rule_id lookup; response has core fields and an extensible JSON map."
   },
   {
@@ -706,7 +636,6 @@
     "operation_id": "ImportRules",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-rules",
     "notes": "Multipart NDJSON with overwrite, exception, connector and new-list options; HTTP-200 partial failures retained."
   },
   {
@@ -716,7 +645,6 @@
     "operation_id": "PatchRule",
     "scope": "Space",
     "contract": "partial",
-    "evidence": "live-rules",
     "notes": "Typed common fields and exception-list replacement; any other field through PatchRule::field."
   },
   {
@@ -726,8 +654,7 @@
     "operation_id": "ReadPrivileges",
     "scope": "Space",
     "contract": "unreviewed",
-    "evidence": "live-rules",
-    "notes": "JSON privilege response; exercised only as administrator in the live suite."
+    "notes": "JSON privilege response."
   },
   {
     "wrapper": "spaces.create",
@@ -736,7 +663,6 @@
     "operation_id": "post-spaces-space",
     "scope": "Global",
     "contract": "partial",
-    "evidence": "live-roles-spaces",
     "notes": "Typed ID, name, description and disabled features; other fields kept in an extensible map."
   },
   {
@@ -746,7 +672,6 @@
     "operation_id": "delete-spaces-space-id",
     "scope": "Global",
     "contract": "unreviewed",
-    "evidence": "live-roles-spaces",
     "notes": "Single space deletion; no full contract audit."
   },
   {
@@ -756,7 +681,6 @@
     "operation_id": "get-spaces-space-id",
     "scope": "Global",
     "contract": "partial",
-    "evidence": "live-roles-spaces",
     "notes": "Typed ID, name, description and disabled features; other fields kept in an extensible map."
   },
   {
@@ -766,7 +690,6 @@
     "operation_id": "get-spaces-space",
     "scope": "Global",
     "contract": "partial",
-    "evidence": "live-roles-spaces",
     "notes": "Same space fields as get; no optional listing parameters."
   },
   {
@@ -776,7 +699,6 @@
     "operation_id": "put-spaces-space-id",
     "scope": "Global",
     "contract": "partial",
-    "evidence": "live-roles-spaces",
     "notes": "Same fields as creation; extensible fields are sent back unchanged."
   }
 ]
