@@ -5,6 +5,7 @@ use serde_json::{Map, Value, json};
 use crate::{
     Kibana, Scope, SortOrder,
     http::{Empty, Method},
+    pagination::paginated,
     request::endpoint,
     security::Severity,
 };
@@ -366,3 +367,5 @@ impl FindComments<'_> {
         Self(self.0.param("sortOrder", order.as_str()))
     }
 }
+
+paginated!(FindCases => CasePage, FindComments => CommentPage);

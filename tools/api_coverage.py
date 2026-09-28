@@ -20,10 +20,11 @@ VERBS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 NON_ENDPOINTS = {
     "client.cases", "client.default_space", "client.exceptions", "client.fleet", "client.request",
     "client.roles", "client.security", "client.space", "client.space_id", "client.spaces", "client.transport",
-    "exceptions.reference",
+    "exceptions.reference", "fleet.is_finished",
+    "fleet.wait_for_action", "fleet.wait_for_agent_policy", "fleet.wait_for_upload",
 }
 # Modules without endpoints.
-NON_ENDPOINT_MODULES = {"error.rs", "lib.rs", "request.rs"}
+NON_ENDPOINT_MODULES = {"error.rs", "lib.rs", "pagination.rs", "poll.rs", "request.rs"}
 # Live suites need a deployment; wire tests must run offline in every CI job.
 LIVE_TESTS = {"live.rs", "deployment.rs"}
 
@@ -66,7 +67,7 @@ def wrappers(root):
         if source.name in NON_ENDPOINT_MODULES:
             continue
         code = source.read_text()
-        functions = list(re.finditer(r"pub fn (\w+)\b[^(]*\(\s*&self", code))
+        functions = list(re.finditer(r"pub (?:async )?fn (\w+)\b[^(]*\(\s*&self", code))
         for function in functions:
             name = f"{source.stem}.{function[1]}"
             if name in NON_ENDPOINTS:

@@ -9,8 +9,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::{
-    Kibana, Scope, SortOrder,
+    Kibana, Result, Scope, SortOrder,
     http::{Method, Raw},
+    pagination::paginated,
+    poll::{self, PollOptions, WaitOutcome},
     request::endpoint,
 };
 
@@ -371,7 +373,104 @@ pub struct Agent {
 #[derive(Clone, Copy, Debug)]
 pub struct Fleet<'a>(pub(crate) &'a Kibana);
 
+impl AgentActionStatus {
+    /// Whether the action can no longer progress: `COMPLETE`, `FAILED`,
+    /// `CANCELLED`, `EXPIRED` or `ROLLOUT_PASSED`. Check the failure counts too.
+    pub fn is_finished(&self) -> bool {
+        matches!(
+            self.status.as_str(),
+            "COMPLETE" | "FAILED" | "CANCELLED" | "EXPIRED" | "ROLLOUT_PASSED"
+        )
+    }
+}
+
+impl AgentUpload {
+    /// Whether the upload can no longer change: `READY`, `FAILED`, `EXPIRED` or `DELETED`.
+    pub fn is_finished(&self) -> bool {
+        matches!(
+            self.status.as_str(),
+            "READY" | "FAILED" | "EXPIRED" | "DELETED"
+        )
+    }
+}
+
 impl<'a> Fleet<'a> {
+    /// Waits until an agent action finishes. The action is looked up among the
+    /// 100 most recent actions, so start waiting soon after submitting it.
+    pub async fn wait_for_action(
+        &self,
+        action_id: &str,
+        options: PollOptions,
+    ) -> Result<WaitOutcome<AgentActionStatus>> {
+        poll::wait(
+            options,
+            || async {
+                let actions = self
+                    .agent_action_status()
+                    .per_page(100)
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+                Ok(actions.items.into_iter().find(|a| a.action_id == action_id))
+            },
+            AgentActionStatus::is_finished,
+        )
+        .await
+    }
+
+    /// Waits until the upload created by a diagnostics action finishes.
+    /// Download it with [`download_agent_file`](Self::download_agent_file) once it is `READY`.
+    pub async fn wait_for_upload(
+        &self,
+        agent_id: &str,
+        action_id: &str,
+        options: PollOptions,
+    ) -> Result<WaitOutcome<AgentUpload>> {
+        poll::wait(
+            options,
+            || async {
+                let uploads = self
+                    .list_agent_uploads(agent_id)
+                    .send()
+                    .await?
+                    .json()
+                    .await?;
+                Ok(uploads.items.into_iter().find(|u| u.action_id == action_id))
+            },
+            AgentUpload::is_finished,
+        )
+        .await
+    }
+
+    /// Waits until the agent is online and reports `policy_id` at `revision` or later.
+    pub async fn wait_for_agent_policy(
+        &self,
+        agent_id: &str,
+        policy_id: &str,
+        revision: u64,
+        options: PollOptions,
+    ) -> Result<WaitOutcome<Agent>> {
+        poll::wait(
+            options,
+            || async {
+                Ok(Some(
+                    self.get_agent(agent_id).send().await?.json().await?.item,
+                ))
+            },
+            |agent| {
+                agent.policy_id.as_deref() == Some(policy_id)
+                    && agent.status.as_deref() == Some("online")
+                    && agent
+                        .extra
+                        .get("policy_revision")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|current| current >= revision)
+            },
+        )
+        .await
+    }
+
     /// Initializes Fleet in the current space. Safe to repeat.
     pub fn setup(&self) -> Setup<'a> {
         Setup(
@@ -1277,3 +1376,9 @@ include_inactive_setter!(
 );
 upgrade_setters!(UpgradeAgent, BulkUpgradeAgents);
 diagnostics_setters!(RequestAgentDiagnostics, BulkRequestAgentDiagnostics);
+paginated!(
+    FindEnrollmentKeys => FleetPage<EnrollmentKey>,
+    FindAgents => FleetPage<Agent>,
+    FindAgentPolicies => FleetPage<AgentPolicy>,
+    FindPackagePolicies => FleetPage<PackagePolicy>,
+);

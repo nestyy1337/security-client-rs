@@ -6,6 +6,7 @@ use crate::{
     Kibana, Scope, SortOrder,
     exceptions::ListReference,
     http::{Method, Raw},
+    pagination::paginated,
     request::endpoint,
 };
 
@@ -456,3 +457,5 @@ impl ImportRules<'_> {
         Self(self.0.param("as_new_list", enabled))
     }
 }
+
+paginated!(FindRules => RulePage);

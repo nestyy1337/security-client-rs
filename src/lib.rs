@@ -37,6 +37,8 @@ mod error;
 pub mod exceptions;
 pub mod fleet;
 pub mod http;
+pub mod pagination;
+pub mod poll;
 mod request;
 pub mod roles;
 pub mod security;
