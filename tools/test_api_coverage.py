@@ -4,7 +4,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from api_coverage import canonical, fingerprint, inventory, validate, wrappers
+from api_coverage import called, canonical, inventory, report, validate, wrappers
 
 
 class CoverageTests(unittest.TestCase):
@@ -31,32 +31,32 @@ impl GetAgent<'_> {
         self.spec = {"paths": {"/api/fleet/agents/{agentId}": {
             "get": {"operationId": "get-agent"}
         }}}
-        self.metadata = {"evidence": {"workflows": {}}}
+        self.metadata = {"version": "9.5.4", "url": "https://example.invalid/kibana.yaml", "sha256": "0" * 64}
         self.rows = [{"wrapper": "fleet.agent", "method": "GET",
                       "path": "/api/fleet/agents/{agentId}", "scope": "Space",
                       "operation_id": "get-agent", "contract": "unreviewed",
-                      "notes": "No live agent evidence.", "evidence": None}]
+                      "notes": "No live agent evidence."}]
 
     def test_parameter_spelling_matches_but_space_prefix_does_not_disappear(self):
-        validate(self.root, self.metadata, inventory(self.spec), self.rows)
+        validate(self.root, inventory(self.spec), self.rows)
         self.assertEqual(canonical("/api/fleet/agents/{id}"), canonical(self.rows[0]["path"]))
         self.assertNotEqual(canonical("/s/{spaceId}/api/fleet/agents/{id}"), canonical(self.rows[0]["path"]))
 
     def test_missing_wrapper_and_wrong_scope_fail(self):
         with self.assertRaisesRegex(ValueError, "Wrapper inventory differs"):
-            validate(self.root, self.metadata, inventory(self.spec), [])
+            validate(self.root, inventory(self.spec), [])
         self.rows[0]["scope"] = "Global"
         with self.assertRaisesRegex(ValueError, "Rust route differs"):
-            validate(self.root, self.metadata, inventory(self.spec), self.rows)
+            validate(self.root, inventory(self.spec), self.rows)
 
     def test_changed_route_and_operation_id_fail(self):
         rows = copy.deepcopy(self.rows)
         rows[0]["method"] = "DELETE"
         with self.assertRaisesRegex(ValueError, "absent from pinned spec"):
-            validate(self.root, self.metadata, inventory(self.spec), rows)
+            validate(self.root, inventory(self.spec), rows)
         self.rows[0]["operation_id"] = "renamed-operation"
         with self.assertRaisesRegex(ValueError, "Operation ID changed"):
-            validate(self.root, self.metadata, inventory(self.spec), self.rows)
+            validate(self.root, inventory(self.spec), self.rows)
 
     def test_duplicate_upstream_route_is_not_silently_collapsed(self):
         self.spec["paths"]["/api/fleet/agents/{id}"] = {"get": {"operationId": "other-agent"}}
@@ -73,14 +73,15 @@ impl GetAgent<'_> {
         (self.root / "tests/fleet.rs").write_text("// no calls")
         (self.root / "tests/live.rs").write_text("client.fleet().agent(id)")
         with self.assertRaisesRegex(ValueError, "without an offline wire test.*fleet.agent"):
-            validate(self.root, self.metadata, inventory(self.spec), self.rows)
+            validate(self.root, inventory(self.spec), self.rows)
 
-    def test_evidence_inputs_change_when_client_changes(self):
-        files = ["src/fleet.rs"]
-        before = fingerprint(self.root, files)
-        with (self.root / files[0]).open("a") as source:
-            source.write("// changed client\n")
-        self.assertNotEqual(before, fingerprint(self.root, files))
+    def test_live_column_counts_calls_through_namespace_variables_only(self):
+        (self.root / "tests/live.rs").write_text("let fleet = client.fleet();\nfleet.agent(&id).send();")
+        self.assertEqual(called(self.root, {"fleet.agent"}, live=True), {"fleet.agent"})
+        (self.root / "tests/live.rs").write_text("let other = client.fleet();\nother.agent(&id).send();")
+        self.assertEqual(called(self.root, {"fleet.agent"}, live=True), set())
+        content = report(self.root, self.metadata, inventory(self.spec), self.rows)
+        self.assertIn("| `fleet.agent` | `get-agent` | `GET /api/fleet/agents/{agentId}` | unreviewed | - |", content)
 
 
 if __name__ == "__main__":

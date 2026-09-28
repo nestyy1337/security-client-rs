@@ -5,7 +5,7 @@ from pathlib import Path
 import uuid
 from playwright.async_api import async_playwright, expect
 
-BASE = os.environ.get("KIBANA_RS_DEMO_URL", "http://100.115.129.28:8787")
+BASE = os.environ.get("KIBANA_RS_DEMO_URL", "http://127.0.0.1:8787")
 CHROME = os.environ.get("CHROME_BIN", "/home/szymon/.nix-profile/bin/google-chrome")
 ARTIFACTS = Path(os.environ.get("KIBANA_RS_SCREENSHOTS", "/tmp/kibana-rs-screenshots"))
 

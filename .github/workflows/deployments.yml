@@ -20,6 +20,8 @@ jobs:
         profile: [9.5.4-basic, 9.4.7-basic]
     steps:
       - uses: actions/checkout@v4
+      # Image extraction otherwise pushes the runner past Elasticsearch's disk watermark,
+      # which blocks shard allocation.
       - name: Make room for deployment images
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet
