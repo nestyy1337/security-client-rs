@@ -1,6 +1,6 @@
-use std::fmt;
+use std::{fmt, time::Duration};
 
-use http::{HeaderMap, StatusCode};
+use http::{HeaderMap, StatusCode, header::RETRY_AFTER};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -64,6 +64,22 @@ impl Error {
         };
         let value: serde_json::Value = serde_json::from_str(body).ok()?;
         value.get("message")?.as_str().map(str::to_owned)
+    }
+
+    /// The `Retry-After` delay of an error response, when given in seconds.
+    /// HTTP-date values are not parsed.
+    pub fn retry_after(&self) -> Option<Duration> {
+        let Self::Api { headers, .. } = self else {
+            return None;
+        };
+        let seconds = headers
+            .get(RETRY_AFTER)?
+            .to_str()
+            .ok()?
+            .trim()
+            .parse()
+            .ok()?;
+        Some(Duration::from_secs(seconds))
     }
 
     pub(crate) fn serialize(error: impl std::error::Error + Send + Sync + 'static) -> Self {

@@ -23,6 +23,12 @@ NON_ENDPOINTS = {
     "exceptions.reference", "fleet.is_finished",
     "fleet.wait_for_action", "fleet.wait_for_agent_policy", "fleet.wait_for_upload",
 }
+# Helpers that send requests through named builders. A test calling the helper exercises them.
+HELPER_CALLS = {
+    "fleet.wait_for_action": {"fleet.agent_action_status"},
+    "fleet.wait_for_agent_policy": {"fleet.get_agent"},
+    "fleet.wait_for_upload": {"fleet.list_agent_uploads"},
+}
 # Modules without endpoints.
 NON_ENDPOINT_MODULES = {"error.rs", "lib.rs", "pagination.rs", "poll.rs", "request.rs"}
 # Live suites need a deployment; wire tests must run offline in every CI job.
@@ -93,12 +99,15 @@ def called(root, names, live):
     """
     files = sorted((root / "tests").glob("*.rs"))
     code = "\n".join(path.read_text() for path in files if (path.name in LIVE_TESTS) == live)
-    found = set()
-    for name in names:
+    def calls(name):
         namespace, method = name.split(".")
         receiver = r"" if namespace == "client" else rf"(?:\.{namespace}\(\)|\b{namespace})\s*"
-        if re.search(rf"{receiver}\.{method}\(", code):
-            found.add(name)
+        return re.search(rf"{receiver}\.{method}\(", code) is not None
+
+    found = {name for name in names if calls(name)}
+    for helper, builders in HELPER_CALLS.items():
+        if calls(helper):
+            found |= builders & set(names)
     return found
 
 

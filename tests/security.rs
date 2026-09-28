@@ -4,7 +4,7 @@ use common::Mock;
 use kibana_rs::{
     SortOrder,
     exceptions::{ListReference, NamespaceType},
-    security::{QueryLanguage, QueryRule, RuleSelector, Severity},
+    security::{QueryLanguage, QueryRule, RiskScore, RuleSelector, Severity},
 };
 use serde_json::{Value, json};
 
@@ -184,7 +184,7 @@ async fn query_rules_serialize_defaults_and_every_option() {
         .language(QueryLanguage::Lucene)
         .index(["auditbeat-*", "logs-endpoint.*"])
         .severity(Severity::Critical)
-        .risk_score(99)
+        .risk_score(RiskScore::new(99).unwrap())
         .enabled(true)
         .interval("1m")
         .from("now-2m")
@@ -226,7 +226,7 @@ async fn patch_rule_sends_the_selector_and_only_changed_fields() {
         .enabled(true)
         .query("event.outcome: success")
         .severity(Severity::Low)
-        .risk_score(10)
+        .risk_score(RiskScore::try_from(10).unwrap())
         .tags(["triaged"])
         .exceptions_list(vec![])
         .field("max_signals", 50)
@@ -325,4 +325,14 @@ async fn exports_stream_ndjson_and_imports_upload_multipart_with_partial_failure
             .as_bytes(),
         exported.as_ref()
     );
+}
+
+#[test]
+fn risk_scores_above_100_are_rejected() {
+    assert_eq!(RiskScore::new(100).unwrap().get(), 100);
+    assert!(matches!(
+        RiskScore::new(101),
+        Err(kibana_rs::Error::InvalidRequest(_))
+    ));
+    assert!(RiskScore::try_from(255).is_err());
 }

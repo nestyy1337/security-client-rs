@@ -5,9 +5,11 @@
 //! once `total` items have been seen. Kibana pages by offset, so concurrent
 //! changes can skip or repeat items, and most collections refuse to page past
 //! 10,000 results.
-use std::future::Future;
-
-use futures_util::{Stream, TryStreamExt, stream};
+use futures_util::{
+    StreamExt, TryStreamExt,
+    future::BoxFuture,
+    stream::{self, BoxStream},
+};
 use serde_json::Value;
 
 use crate::{
@@ -103,33 +105,37 @@ pub(crate) trait Paged<'a>: Clone + Send + 'a {
     type Page: Page + Send + 'a;
 
     fn with_page(self, page: u32) -> Self;
-    fn fetch(self) -> impl Future<Output = Result<Self::Page>> + Send + 'a;
+    // Boxed rather than `impl Future`: Rust 1.88 cannot prove the lifetime bounds
+    // of the unboxed future inside the page stream (rust-lang/rust#100013).
+    fn fetch(self) -> BoxFuture<'a, Result<Self::Page>>;
 }
 
-pub(crate) fn pages<'a, B: Paged<'a>>(
-    builder: B,
-) -> impl Stream<Item = Result<B::Page>> + Send + 'a {
-    stream::try_unfold(Some((builder, 1, 0)), |state| async move {
-        let Some((builder, page, seen)) = state else {
-            return Ok(None);
-        };
-        let result = builder.clone().with_page(page).fetch().await?;
-        let count = result.items().len() as u64;
-        let seen: u64 = seen + count;
-        let next = (count > 0 && seen < result.total()).then_some((builder, page + 1, seen));
-        Ok(Some((result, next)))
-    })
+/// The next page, if any: `(builder, page number, items seen so far)`.
+type Cursor<B> = Option<(B, u32, u64)>;
+
+pub(crate) fn pages<'a, B: Paged<'a>>(builder: B) -> BoxStream<'a, Result<B::Page>> {
+    stream::try_unfold(Some((builder, 1, 0)), next_page::<B>).boxed()
 }
 
-pub(crate) fn items<'a, B: Paged<'a>>(
-    builder: B,
-) -> impl Stream<Item = Result<<B::Page as Page>::Item>> + Send + 'a
+async fn next_page<'a, B: Paged<'a>>(cursor: Cursor<B>) -> Result<Option<(B::Page, Cursor<B>)>> {
+    let Some((builder, page, seen)) = cursor else {
+        return Ok(None);
+    };
+    let result = builder.clone().with_page(page).fetch().await?;
+    let count = result.items().len() as u64;
+    let seen = seen + count;
+    let next = (count > 0 && seen < result.total()).then_some((builder, page + 1, seen));
+    Ok(Some((result, next)))
+}
+
+pub(crate) fn items<'a, B: Paged<'a>>(builder: B) -> BoxStream<'a, Result<<B::Page as Page>::Item>>
 where
     <B::Page as Page>::Item: Send + 'a,
 {
     pages(builder)
         .map_ok(|page| stream::iter(page.into_items().into_iter().map(Ok)))
         .try_flatten()
+        .boxed()
 }
 
 /// Adds `pages()` and `items()` to a builder whose `page` setter starts at one.
@@ -142,25 +148,25 @@ macro_rules! paginated {
                 self.page(page)
             }
 
-            async fn fetch(self) -> $crate::Result<$page> {
-                self.send().await?.json().await
+            fn fetch(self) -> ::futures_util::future::BoxFuture<'a, $crate::Result<$page>> {
+                ::std::boxed::Box::pin(async move { self.send().await?.json().await })
             }
         }
 
         impl<'a> $name<'a> {
             /// Streams every page from the first, one request per page.
             /// Any page set on this builder is ignored.
-            pub fn pages(self) -> impl ::futures_util::Stream<Item = $crate::Result<$page>> + Send + 'a {
+            pub fn pages(self) -> ::futures_util::stream::BoxStream<'a, $crate::Result<$page>> {
                 $crate::pagination::pages(self)
             }
 
             /// Streams every item across all pages. See [`pages`](Self::pages).
             pub fn items(
                 self,
-            ) -> impl ::futures_util::Stream<
-                Item = $crate::Result<<$page as $crate::pagination::Page>::Item>,
-            > + Send
-            + 'a {
+            ) -> ::futures_util::stream::BoxStream<
+                'a,
+                $crate::Result<<$page as $crate::pagination::Page>::Item>,
+            > {
                 $crate::pagination::items(self)
             }
         }

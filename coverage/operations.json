@@ -204,7 +204,7 @@
     "operation_id": "get-fleet-agents-action-status",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. No automatic polling."
+    "notes": "Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. Fleet::wait_for_action polls it."
   },
   {
     "wrapper": "fleet.agent_status",
@@ -438,7 +438,7 @@
     "operation_id": "get-fleet-agents-agentid-uploads",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Typed status, action ID and file metadata; caller correlates readiness before download."
+    "notes": "Typed status, action ID and file metadata; Fleet::wait_for_upload polls it until the upload finishes."
   },
   {
     "wrapper": "fleet.list_outputs",

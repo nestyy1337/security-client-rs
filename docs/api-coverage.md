@@ -47,7 +47,7 @@ Baseline: the [Kibana 9.5.4 OpenAPI bundle](https://raw.githubusercontent.com/el
 | `exceptions.summary` | `ReadExceptionListSummary` | `GET /api/exception_lists/summary` | partial | yes | JSON OS summary with optional filter. Upstream can report total=0 when no items have os_types; use find_items().total for item counts. |
 | `exceptions.update_item` | `UpdateExceptionListItem` | `PUT /api/exception_lists/items` | partial | yes | Explicit optimistic concurrency token; replaces modeled fields. Endpoint artifact validation deferred. |
 | `exceptions.update_list` | `UpdateExceptionList` | `PUT /api/exception_lists` | partial | yes | Explicit optimistic concurrency token; replaces modeled fields, not a patch. |
-| `fleet.agent_action_status` | `get-fleet-agents-action-status` | `GET /api/fleet/agents/action_status` | partial | yes | Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. No automatic polling. |
+| `fleet.agent_action_status` | `get-fleet-agents-action-status` | `GET /api/fleet/agents/action_status` | partial | yes | Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. Fleet::wait_for_action polls it. |
 | `fleet.agent_status` | `get-fleet-agent-status` | `GET /api/fleet/agent_status` | unreviewed | yes | JSON status summary. |
 | `fleet.bulk_reassign_agents` | `post-fleet-agents-bulk-reassign` | `POST /api/fleet/agents/bulk_reassign` | unreviewed | yes | ID/KQL selection, dryRun, batchSize and includeInactive; typed action or dry-run result. |
 | `fleet.bulk_request_agent_diagnostics` | `post-fleet-agents-bulk-request-diagnostics` | `POST /api/fleet/agents/bulk_request_diagnostics` | partial | yes | ID/KQL selection, dryRun, batchSize and CPU metric; no includeInactive contract. |
@@ -73,7 +73,7 @@ Baseline: the [Kibana 9.5.4 OpenAPI bundle](https://raw.githubusercontent.com/el
 | `fleet.get_package` | `get-fleet-epm-packages-pkgname-pkgversion` | `GET /api/fleet/epm/packages/{pkgName}/{pkgVersion}` | unreviewed | yes | Exact package name/version; core fields plus extensible JSON. |
 | `fleet.get_package_policy` | `get-fleet-package-policies-packagepolicyid` | `GET /api/fleet/package_policies/{packagePolicyId}` | unreviewed | yes | Core fields plus extensible JSON; inputs remain JSON. |
 | `fleet.install_package` | `post-fleet-epm-packages-pkgname-pkgversion` | `POST /api/fleet/epm/packages/{pkgName}/{pkgVersion}` | partial | yes | Force and ignore_constraints options; query options not exposed. JSON asset result. |
-| `fleet.list_agent_uploads` | `get-fleet-agents-agentid-uploads` | `GET /api/fleet/agents/{agentId}/uploads` | partial | yes | Typed status, action ID and file metadata; caller correlates readiness before download. |
+| `fleet.list_agent_uploads` | `get-fleet-agents-agentid-uploads` | `GET /api/fleet/agents/{agentId}/uploads` | partial | yes | Typed status, action ID and file metadata; Fleet::wait_for_upload polls it until the upload finishes. |
 | `fleet.list_outputs` | `get-fleet-outputs` | `GET /api/fleet/outputs` | unreviewed | yes | Default output listing as JSON; not output management. |
 | `fleet.list_packages` | `get-fleet-epm-packages` | `GET /api/fleet/epm/packages` | partial | yes | Category and prerelease filters; other catalogue options not exposed. |
 | `fleet.reassign_agent` | `post-fleet-agents-agentid-reassign` | `POST /api/fleet/agents/{agentId}/reassign` | unreviewed | yes | Policy-ID reassignment; JSON acknowledgment. |

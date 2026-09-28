@@ -80,6 +80,11 @@ impl GetAgent<'_> {
         self.assertEqual(called(self.root, {"fleet.agent"}, live=True), {"fleet.agent"})
         (self.root / "tests/live.rs").write_text("let other = client.fleet();\nother.agent(&id).send();")
         self.assertEqual(called(self.root, {"fleet.agent"}, live=True), set())
+        (self.root / "tests/live.rs").write_text("let fleet = client.fleet();\nfleet.wait_for_agent_policy(&id, p, 1, o);")
+        self.rows[0]["wrapper"] = "fleet.get_agent"
+        self.assertEqual(called(self.root, {"fleet.get_agent"}, live=True), {"fleet.get_agent"})
+        self.rows[0]["wrapper"] = "fleet.agent"
+        (self.root / "tests/live.rs").write_text("")
         content = report(self.root, self.metadata, inventory(self.spec), self.rows)
         self.assertIn("| `fleet.agent` | `get-agent` | `GET /api/fleet/agents/{agentId}` | unreviewed | - |", content)
 

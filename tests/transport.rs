@@ -116,7 +116,9 @@ async fn errors_keep_status_headers_bounded_body_and_kibana_message() {
     let mock = Mock::start().await;
     let client = mock.client();
     mock.reply_with(429, vec![("retry-after", "3".into())], "x".repeat(20_000));
-    match client.status().send().await.unwrap_err() {
+    let error = client.status().send().await.unwrap_err();
+    assert_eq!(error.retry_after(), Some(Duration::from_secs(3)));
+    match error {
         Error::Api {
             status,
             headers,

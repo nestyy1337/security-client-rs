@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::{
-    Kibana, Scope, SortOrder,
+    Error, Kibana, Result, Scope, SortOrder,
     exceptions::ListReference,
     http::{Method, Raw},
     pagination::paginated,
@@ -27,6 +27,35 @@ impl Severity {
             Self::High => "high",
             Self::Critical => "critical",
         }
+    }
+}
+
+/// A detection rule's risk score, from 0 to 100.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[serde(transparent)]
+pub struct RiskScore(u8);
+
+impl RiskScore {
+    /// Fails with [`Error::InvalidRequest`] above 100.
+    pub fn new(score: u8) -> Result<Self> {
+        if score > 100 {
+            return Err(Error::InvalidRequest(format!(
+                "risk score {score} is above 100"
+            )));
+        }
+        Ok(Self(score))
+    }
+
+    pub fn get(self) -> u8 {
+        self.0
+    }
+}
+
+impl TryFrom<u8> for RiskScore {
+    type Error = Error;
+
+    fn try_from(score: u8) -> Result<Self> {
+        Self::new(score)
     }
 }
 
@@ -74,7 +103,7 @@ pub struct QueryRule {
     language: QueryLanguage,
     index: Vec<String>,
     severity: Severity,
-    risk_score: u8,
+    risk_score: RiskScore,
     enabled: bool,
     interval: String,
     from: String,
@@ -100,7 +129,7 @@ impl QueryRule {
             language: QueryLanguage::Kuery,
             index: vec!["logs-*".into()],
             severity: Severity::Medium,
-            risk_score: 47,
+            risk_score: RiskScore(47),
             enabled: false,
             interval: "5m".into(),
             from: "now-6m".into(),
@@ -125,8 +154,7 @@ impl QueryRule {
         self
     }
 
-    /// A score from 0 to 100.
-    pub fn risk_score(mut self, score: u8) -> Self {
+    pub fn risk_score(mut self, score: RiskScore) -> Self {
         self.risk_score = score;
         self
     }
@@ -383,7 +411,7 @@ impl PatchRule<'_> {
         Self(self.0.field("severity", severity))
     }
 
-    pub fn risk_score(self, score: u8) -> Self {
+    pub fn risk_score(self, score: RiskScore) -> Self {
         Self(self.0.field("risk_score", score))
     }
 
