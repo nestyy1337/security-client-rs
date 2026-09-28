@@ -12,7 +12,8 @@ use crate::{
     },
 };
 
-/// Characters escaped inside one path segment, including `/` and `%`.
+/// Characters escaped inside one path segment. URL parsing treats `\\` as `/`
+/// and resolves dot segments, so `/`, `\\` and `%` must never pass through.
 const SEGMENT: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'"')
@@ -24,6 +25,7 @@ const SEGMENT: &AsciiSet = &CONTROLS
     .add(b'{')
     .add(b'}')
     .add(b'/')
+    .add(b'\\')
     .add(b'%');
 
 /// A request to any Kibana route, created by [`Kibana::request`].
@@ -187,12 +189,14 @@ impl<'a> Request<'a> {
     }
 }
 
+/// Omits query values, header values and the body, which can carry secrets.
 impl fmt::Debug for Request<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let query: Vec<&str> = self.query.iter().map(|(key, _)| key.as_str()).collect();
         f.debug_struct("Request")
             .field("method", &self.method)
             .field("path", &self.path)
-            .field("query", &self.query)
+            .field("query_keys", &query)
             .finish_non_exhaustive()
     }
 }
@@ -262,6 +266,10 @@ mod tests {
             "/s/soc%20team/api/cases/a%2Fb%3Fc%23d%25e"
         );
         assert_eq!(path(None, &["api", "status"]).unwrap(), "/api/status");
+        assert_eq!(
+            path(Some("soc"), &["api", "cases", r"..\..\api\security\role"]).unwrap(),
+            "/s/soc/api/cases/..%5C..%5Capi%5Csecurity%5Crole"
+        );
         for invalid in [&[][..], &["api", ""], &["api", "."], &["api", ".."]] {
             assert!(path(None, invalid).is_err());
         }
