@@ -131,6 +131,19 @@ async fn waiting_for_an_action_returns_its_final_state_or_the_last_seen_state() 
         WaitOutcome::TimedOut { last: Some(last) } => assert_eq!(last.status, "IN_PROGRESS"),
         other => panic!("expected a timeout with the last state, got {other:?}"),
     }
+    let empty = Mock::start().await;
+    empty.json(json!({"items": []}));
+    let outcome = empty
+        .client()
+        .fleet()
+        .wait_for_action("act", PollOptions::new(Duration::ZERO))
+        .await
+        .unwrap();
+    assert!(
+        matches!(outcome, WaitOutcome::TimedOut { last: None }),
+        "{outcome:?}"
+    );
+    assert!(outcome.finished().is_none());
 }
 
 #[tokio::test]
@@ -219,4 +232,85 @@ async fn configured_builders_can_be_reused() {
             "{}\n"
         );
     }
+}
+
+#[tokio::test]
+async fn every_page_shape_streams_its_items() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+
+    mock.json(
+        json!({"comments": [{"id": "c1"}, {"id": "c2"}], "page": 1, "per_page": 2, "total": 3}),
+    );
+    mock.json(json!({"comments": [{"id": "c3"}], "page": 2, "per_page": 2, "total": 3}));
+    let comments: Vec<_> = client
+        .cases()
+        .find_comments("case")
+        .per_page(2)
+        .items()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        comments
+            .iter()
+            .map(|c| c["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        ["c1", "c2", "c3"]
+    );
+    for page in ["1", "2"] {
+        mock.take().route(
+            "GET",
+            "/s/soc/api/cases/case/comments/_find",
+            &[("perPage", "2"), ("page", page)],
+        );
+    }
+
+    let policy = |id: &str| {
+        json!({"id": id, "name": id, "namespace": "default", "revision": 1,
+               "package": {"name": "system", "version": "1.0.0"}})
+    };
+    mock.json(json!({"items": [policy("p1")], "page": 1, "perPage": 1, "total": 2}));
+    mock.json(json!({"items": [policy("p2")], "page": 2, "perPage": 1, "total": 2}));
+    let policies: Vec<_> = client
+        .fleet()
+        .find_package_policies()
+        .per_page(1)
+        .items()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        policies.iter().map(|p| p.id.as_str()).collect::<Vec<_>>(),
+        ["p1", "p2"]
+    );
+    for page in ["1", "2"] {
+        mock.take().route(
+            "GET",
+            "/s/soc/api/fleet/package_policies",
+            &[("perPage", "1"), ("page", page)],
+        );
+    }
+
+    let item = json!({"id": "i1", "item_id": "i1", "list_id": "l", "name": "n", "description": "",
+                      "namespace_type": "single", "entries": []});
+    mock.json(json!({"data": [item], "page": 1, "per_page": 50, "total": 1}));
+    let items: Vec<_> = client
+        .exceptions()
+        .find_items("l")
+        .items()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(items.len(), 1);
+    mock.take().route(
+        "GET",
+        "/s/soc/api/exception_lists/items/_find",
+        &[("list_id", "l"), ("page", "1")],
+    );
+    assert_eq!(
+        mock.request_count(),
+        0,
+        "a complete first page ends the stream"
+    );
 }

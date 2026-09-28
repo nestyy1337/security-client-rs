@@ -71,12 +71,20 @@ impl fmt::Debug for Credentials {
 pub struct Certificate(reqwest::Certificate);
 
 impl Certificate {
+    /// Every certificate in `pem` is trusted, so a CA bundle can be passed as is.
+    /// Fails when `pem` contains no certificate.
     pub fn from_pem(pem: &[u8]) -> Result<Self> {
+        let invalid = || Error::Configuration("no PEM certificate found".into());
+        let bundle = reqwest::Certificate::from_pem_bundle(pem).map_err(|_| invalid())?;
+        if bundle.is_empty() {
+            return Err(invalid());
+        }
         reqwest::Certificate::from_pem(pem)
             .map(Self)
-            .map_err(|_| Error::Configuration("invalid PEM certificate".into()))
+            .map_err(|_| invalid())
     }
 
+    /// The DER encoding is checked when the transport is built.
     pub fn from_der(der: &[u8]) -> Result<Self> {
         reqwest::Certificate::from_der(der)
             .map(Self)
@@ -231,7 +239,9 @@ impl TransportBuilder {
 
         Ok(Transport {
             inner: Arc::new(Inner {
-                client: client.build()?,
+                client: client.build().map_err(|_| {
+                    Error::Configuration("invalid TLS configuration or root certificate".into())
+                })?,
                 url,
                 headers,
                 response_limit: self.response_limit,
