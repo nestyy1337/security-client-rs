@@ -1,4 +1,4 @@
-use std::{fmt, time::Duration};
+use std::{fmt, sync::Arc, time::Duration};
 
 use percent_encoding::{AsciiSet, CONTROLS, utf8_percent_encode};
 use serde::Serialize;
@@ -32,6 +32,8 @@ const SEGMENT: &AsciiSet = &CONTROLS
 ///
 /// Every endpoint builder wraps one of these. Construction never fails;
 /// invalid path segments and serialization errors are returned by `send`.
+/// Cloning is cheap enough to reuse a configured request, for example per page.
+#[derive(Clone)]
 #[must_use = "requests do nothing until sent"]
 pub struct Request<'a> {
     transport: &'a Transport,
@@ -41,9 +43,10 @@ pub struct Request<'a> {
     headers: HeaderMap,
     body: Option<Payload>,
     timeout: Option<Duration>,
-    error: Option<Error>,
+    error: Option<Arc<Error>>,
 }
 
+#[derive(Clone)]
 enum Payload {
     Json(Value),
     Body(Body),
@@ -57,7 +60,7 @@ impl<'a> Request<'a> {
         };
         let (path, error) = match path(space, segments) {
             Ok(path) => (path, None),
-            Err(error) => (String::new(), Some(error)),
+            Err(error) => (String::new(), Some(Arc::new(error))),
         };
         Self {
             transport: client.transport(),
@@ -162,7 +165,9 @@ impl<'a> Request<'a> {
 
     pub(crate) async fn send_as<T>(self) -> Result<Response<T>> {
         if let Some(error) = self.error {
-            return Err(error);
+            // A clone shares the deferred error; only the last owner gets the original.
+            return Err(Arc::try_unwrap(error)
+                .unwrap_or_else(|shared| Error::InvalidRequest(shared.to_string())));
         }
         let body = match self.body {
             None => None,
@@ -185,7 +190,7 @@ impl<'a> Request<'a> {
     }
 
     fn fail(&mut self, error: Error) {
-        self.error.get_or_insert(error);
+        self.error.get_or_insert(Arc::new(error));
     }
 }
 
@@ -228,7 +233,7 @@ fn path(space: Option<&str>, segments: &[&str]) -> Result<String> {
 macro_rules! endpoint {
     ($(#[$doc:meta])* $name:ident => $output:ty) => {
         $(#[$doc])*
-        #[derive(Debug)]
+        #[derive(Clone, Debug)]
         #[must_use = "requests do nothing until sent"]
         pub struct $name<'a>($crate::Request<'a>);
 

@@ -1,4 +1,5 @@
 //! Executed by tests/deployment/run.py against a disposable, digest-locked stack.
+use futures_util::TryStreamExt;
 use kibana_rs::{
     Error, Kibana, Result,
     exceptions::{Entry, ListSelector, NewItem, NewList, Operator},
@@ -7,6 +8,7 @@ use kibana_rs::{
         PackageRef, PolicyInput, PolicyStream,
     },
     http::{Certificate, Credentials, StatusCode, TransportBuilder, Url},
+    poll::{PollOptions, WaitOutcome},
     security::{QueryRule, RuleSelector},
 };
 use serde_json::{Value, json};
@@ -244,6 +246,26 @@ async fn pagination_returns_all_owned_rules() {
     expected.sort();
     received.sort();
     assert_eq!(received, expected);
+    let pages: Vec<_> = client
+        .security()
+        .find_rules()
+        .per_page(2)
+        .pages()
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(pages.len(), 2);
+    let mut streamed: Vec<_> = client
+        .security()
+        .find_rules()
+        .per_page(2)
+        .items()
+        .map_ok(|rule| rule.id)
+        .try_collect()
+        .await
+        .unwrap();
+    streamed.sort();
+    assert_eq!(streamed, expected);
     for id in expected {
         client
             .security()
@@ -337,31 +359,15 @@ fn only_missing_shards_are_pending_search_results() {
 }
 
 async fn wait_for_policy(client: &Kibana, agent_id: &str, policy: &str, revision: u64) {
-    let deadline = Instant::now() + Duration::from_secs(180);
-    loop {
-        let agent = client
-            .fleet()
-            .get_agent(agent_id)
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap()
-            .item;
-        if agent.policy_id.as_deref() == Some(policy)
-            && agent.extra.get("policy_revision").and_then(Value::as_u64) == Some(revision)
-            && agent.status.as_deref() == Some("online")
-        {
-            return;
-        }
-        assert!(
-            Instant::now() < deadline,
-            "Agent did not acknowledge policy {policy} revision {revision}; last status={:?}, revision={:?}",
-            agent.status,
-            agent.extra.get("policy_revision")
+    let outcome = client
+        .fleet()
+        .wait_for_agent_policy(agent_id, policy, revision, PollOptions::default())
+        .await
+        .unwrap();
+    if let WaitOutcome::TimedOut { last } = outcome {
+        panic!(
+            "Agent did not acknowledge policy {policy} revision {revision}; last state: {last:?}"
         );
-        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 }
 
@@ -369,31 +375,16 @@ async fn wait_for_action(client: &Kibana, result: BulkActionResult) -> AgentActi
     let BulkActionResult::Action { action_id } = result else {
         panic!("expected an action, received dry-run result")
     };
-    let deadline = Instant::now() + Duration::from_secs(180);
-    loop {
-        let actions = client
-            .fleet()
-            .agent_action_status()
-            .per_page(100)
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        if let Some(action) = actions.items.into_iter().find(|a| a.action_id == action_id)
-            && matches!(
-                action.status.as_str(),
-                "COMPLETE" | "FAILED" | "CANCELLED" | "EXPIRED"
-            )
-        {
-            return action;
+    match client
+        .fleet()
+        .wait_for_action(&action_id, PollOptions::default())
+        .await
+        .unwrap()
+    {
+        WaitOutcome::Finished(action) => action,
+        WaitOutcome::TimedOut { last } => {
+            panic!("Action {action_id} did not finish; last state: {last:?}")
         }
-        assert!(
-            Instant::now() < deadline,
-            "Action {action_id} did not finish"
-        );
-        tokio::time::sleep(Duration::from_secs(2)).await;
     }
 }
 
@@ -546,44 +537,29 @@ async fn fleet_agent_bulk_actions_and_diagnostics() {
         .unwrap();
     let action = wait_for_action(&client, diagnostics).await;
     successful_action(&action);
-    let deadline = Instant::now() + Duration::from_secs(180);
-    loop {
-        let uploads = fleet
-            .list_agent_uploads(&agent_id)
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap();
-        if let Some(upload) = uploads
-            .items
-            .into_iter()
-            .find(|u| u.action_id == action.action_id)
-        {
-            assert_ne!(upload.status, "FAILED", "{upload:?}");
-            if upload.status == "READY" {
-                let bytes = fleet
-                    .download_agent_file(&upload.id, &upload.name)
-                    .send()
-                    .await
-                    .unwrap()
-                    .bytes()
-                    .await
-                    .unwrap();
-                assert!(
-                    bytes.starts_with(b"PK"),
-                    "diagnostics must be a ZIP archive"
-                );
-                break;
-            }
+    let upload = match fleet
+        .wait_for_upload(&agent_id, &action.action_id, PollOptions::default())
+        .await
+        .unwrap()
+    {
+        WaitOutcome::Finished(upload) => upload,
+        WaitOutcome::TimedOut { last } => {
+            panic!("Diagnostics upload did not finish; last state: {last:?}")
         }
-        assert!(
-            Instant::now() < deadline,
-            "Diagnostics upload did not become READY"
-        );
-        tokio::time::sleep(Duration::from_secs(2)).await;
-    }
+    };
+    assert_eq!(upload.status, "READY", "{upload:?}");
+    let bytes = fleet
+        .download_agent_file(&upload.id, &upload.name)
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap();
+    assert!(
+        bytes.starts_with(b"PK"),
+        "diagnostics must be a ZIP archive"
+    );
 
     let upgrade = fleet
         .upgrade_agent(&agent_id, &env("KIBANA_TEST_VERSION"))

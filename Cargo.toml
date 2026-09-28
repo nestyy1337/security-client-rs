@@ -9,7 +9,7 @@ repository = "https://github.com/nestyy1337/security-client-rs"
 readme = "README.md"
 keywords = ["kibana", "elastic", "siem", "security", "fleet"]
 categories = ["api-bindings", "web-programming::http-client"]
-include = ["/src/**/*.rs", "/examples/**/*.rs", "/tests/*.rs", "/tests/common/*.rs", "/README.md", "/LICENSE-APACHE", "/LICENSE-MIT"]
+include = ["/src/**/*.rs", "/examples/**/*.rs", "/tests/*.rs", "/tests/common/*.rs", "/README.md", "/CHANGELOG.md", "/LICENSE-APACHE", "/LICENSE-MIT"]
 
 [workspace]
 members = ["demo"]
@@ -25,10 +25,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_urlencoded = "0.7"
 thiserror = "2"
+tokio = { version = "1", features = ["time"] }
 url = "2"
 
 [dev-dependencies]
 axum = "0.8"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "fs", "io-util"] }
 uuid = { version = "1", features = ["v4"] }

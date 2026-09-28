@@ -325,7 +325,12 @@ impl Transport {
             Some(Content::Json(bytes)) => request
                 .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
                 .body(bytes),
-            Some(Content::Multipart(form)) => request.multipart(form),
+            Some(Content::File {
+                field,
+                file_name,
+                content_type,
+                bytes,
+            }) => request.multipart(Content::form(field, file_name, &content_type, bytes)?),
         };
         request = request.headers(headers);
         if let Some(timeout) = timeout {

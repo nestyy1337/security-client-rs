@@ -7,6 +7,7 @@ use serde_json::{Map, Value};
 use crate::{
     Kibana, Scope, SortOrder,
     http::{Method, Raw},
+    pagination::paginated,
     request::endpoint,
 };
 
@@ -751,3 +752,7 @@ namespace_setter!(
     GetList, DeleteList, FindLists, GetItem, DeleteItem, FindItems, Summary
 );
 find_setters!(FindLists, FindItems);
+paginated!(
+    FindLists => ExceptionPage<ExceptionList>,
+    FindItems => ExceptionPage<ExceptionItem>,
+);
