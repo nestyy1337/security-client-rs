@@ -23,3 +23,15 @@ jobs:
       - run: cargo test --locked --workspace --all-targets
       - run: cargo test --locked --doc
       - run: cargo package --locked
+  msrv:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Keep in step with `rust-version` in Cargo.toml.
+      - uses: dtolnay/rust-toolchain@1.88
+      - run: cargo test --locked --workspace --all-targets
+  dependencies:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
