@@ -1,6 +1,6 @@
 # kibana-rs
 
-An async Rust client for Kibana security operations and Fleet management. The optional browser workbench demonstrates the crate against a real Kibana instance.
+An async Rust client for Kibana security operations and Fleet management. A separate, unpublished [browser workbench](demo/README.md) demonstrates the crate against a real Kibana instance.
 
 The initial implementation targets traditional Kibana 9.x. It is an independent project, not an Elastic-supported client. It has not been published to crates.io.
 
@@ -13,16 +13,6 @@ Against the pinned traditional **9.5.4** bundle: **78/663 named operations** (11
 The [operation report](docs/api-coverage.md) lists every wrapper's official operation ID, contract limitations and recorded test evidence. The [coverage tracker](coverage/README.md) checks the report against a checksum-pinned upstream API bundle and the Rust source. CI does not equate a wrapper with complete parameter or response support.
 
 The [deployment suite](tests/deployment/README.md) runs ten required scenarios against disposable **9.5.4** and **9.4.7** profiles, including a real Fleet Server and two managed Agents. Images and signed packages are checksum-locked. GitHub Actions retains per-profile results and logs. These selected workflows are separate from full API contract parity and packaged-release certification. The older operation-level evidence above remains a historical record.
-
-## Try the running workbench
-
-On Szymon's Tailscale network: **http://homebox:8787**. The IP fallback is http://100.115.129.28:8787.
-
-The workbench runs on homebox against a dedicated Elasticsearch/Kibana 9.5.4 stack. It can create and edit query detection rules, enable/disable them, manage security cases and notes, create agent policies, browse/install integrations, and assign integrations to policies. Changes are real, confined to this demonstration deployment. The initial rules and cases are labelled demonstration resources.
-
-The app uses a Kibana user restricted to the `kibana-rs` space. Backend credentials never reach the browser. Network access is controlled by the existing tailnet policy; the demo has no separate browser login. It binds only to the host's Tailscale IP. Elasticsearch and Kibana themselves bind only to loopback on ports 19200 and 15601.
-
-There are no enrolled agents or production events. Fleet Server provisioning, agent enrollment, and actual telemetry collection are outside this demonstration. No dashboard authoring APIs were implemented.
 
 ## Library
 
@@ -119,33 +109,14 @@ Upgrade and cancellation methods have wire-contract tests, but the container fix
 
 Date-based `elastic-api-version` headers can be set on the transport or per request when a deployment or endpoint requires one. No blanket Serverless compatibility is claimed.
 
-## Run your own isolated demo
-
-Requirements: Nix with flakes, Docker Compose, and a user systemd manager. Rootless Docker is detected. These scripts create only the `kibana-rs-demo` Compose project and `kibana-rs-demo.service`. Expect several GiB of memory and image storage.
-
-```sh
-nix develop -c bash deploy/start-stack.sh
-KIBANA_RS_BIND="$(tailscale ip -4):8787" nix develop -c bash deploy/start-demo.sh
-```
-
-Omit `KIBANA_RS_BIND` to bind the workbench to `127.0.0.1:8787`. Do not bind this demonstration app to a public interface. The Tailscale deployment relies on the tailnet's existing access rules.
-
-The scripts generate credentials under `~/.local/state/kibana-rs` with restricted file permissions. `KIBANA_RS_STATE_DIR` can override this directory. State is outside the checkout. The dedicated stack uses Basic licensing, keeps Elasticsearch data in a named Docker volume, and restarts its containers automatically. A user systemd service runs a separate copy of the release binary and restarts it after failure. Service installation uses the user's data directory rather than modifying a shared dotfiles checkout.
-
-For the user service to start before login and survive logout, enable lingering with `loginctl enable-linger "$(id -un)"`. This is enabled on homebox. Reboot recovery has not been tested.
-
-Package installation requires access to Elastic's package registry. The browser assignment form uses a package's default inputs. Packages requiring additional variables must be configured through the library or Kibana. Installing a package can install its bundled dashboard assets, even though this client provides no dashboard authoring API.
-
-To stop the app, run `systemctl --user stop kibana-rs-demo`. To stop the dedicated containers without deleting data, use Docker Compose with `deploy/compose.yaml` and the generated `stack.env`. The scripts do not alter Tailscale policy or the existing T3 Serve configuration.
-
 ## Verification
 
 Run local checks through the pinned Nix environment:
 
 ```sh
 nix develop -c cargo fmt --all -- --check
-nix develop -c cargo clippy --locked --all-features --all-targets -- -D warnings
-nix develop -c cargo test --locked --all-features --all-targets
+nix develop -c cargo clippy --locked --workspace --all-targets -- -D warnings
+nix develop -c cargo test --locked --workspace --all-targets
 ```
 
 Run the full deployment suite, including provisioning, seeding, assertions and cleanup:
@@ -157,16 +128,7 @@ nix develop -c uv run python -u tests/deployment/run.py --profile 9.4.7-basic
 
 The runner requires Docker on Linux x86_64 and creates its own deployment. It verifies TLS, Basic/API-key permissions, security/case/Fleet lifecycles, pagination, real policy delivery, log ingestion and detection alerts. Every named test must run; ignored or zero-test results fail. Fresh volumes isolate each run. See the [suite documentation](tests/deployment/README.md) for requirements, profiles and artifact locations. Ordinary Cargo tests intentionally ignore these deployment scenarios.
 
-Browser checks use the real workbench and create/delete their own test resources:
-
-```sh
-KIBANA_RS_DEMO_URL=http://homebox:8787 \
-CHROME_BIN=/path/to/chrome \
-KIBANA_RS_SCREENSHOTS=/tmp/kibana-rs-screenshots \
-nix develop -c uv run --with playwright python -u tests/browser.py
-```
-
-The [Check workflow](.github/workflows/check.yml) runs formatting, linting, transport and runner tests, and API coverage checks. The [deployment workflow](.github/workflows/deployments.yml) runs both deployment profiles on main pushes, pull requests, manual dispatch and weekly. See [verification evidence](docs/verification.md) for historical demo results; browser checks do not replace crate deployment tests.
+The [Check workflow](.github/workflows/check.yml) runs formatting, linting, transport and runner tests, and API coverage checks. The [deployment workflow](.github/workflows/deployments.yml) runs both deployment profiles on main pushes, pull requests, manual dispatch and weekly. See [verification evidence](docs/verification.md) for historical demo results and the [workbench documentation](demo/README.md) for browser checks, which do not replace crate deployment tests.
 
 ## Compatibility limits
 

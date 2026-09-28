@@ -7,7 +7,7 @@ export KIBANA_RS_STATE_DIR=${KIBANA_RS_STATE_DIR:-${XDG_STATE_HOME:-$HOME/.local
 state=$KIBANA_RS_STATE_DIR
 source "$state/stack.env"
 
-cargo build --locked --release --features demo --bin kibana-rs-demo
+cargo build --locked --release -p kibana-rs-demo
 KIBANA_URL=http://127.0.0.1:15601 KIBANA_USERNAME=elastic KIBANA_PASSWORD="$ELASTIC_PASSWORD" \
   target/release/kibana-rs-demo --seed
 uv run python deploy/configure-demo.py
