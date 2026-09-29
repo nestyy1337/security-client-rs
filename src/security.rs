@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::{
-    Error, Kibana, Result, Scope, SortOrder,
+    Error, ImportFailure, Kibana, Result, Scope, SortOrder,
     exceptions::ListReference,
     http::{Method, Raw},
     pagination::paginated,
@@ -77,7 +77,28 @@ pub struct DetectionRule {
     pub tags: Vec<String>,
     #[serde(default)]
     pub updated_at: Option<String>,
-    /// Type-specific and newer fields, including `exceptions_list` and `execution_summary`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_summary: Option<RuleExecutionSummary>,
+    /// Type-specific and newer fields, including `exceptions_list`.
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct RuleExecutionSummary {
+    pub last_execution: RuleExecution,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+/// The latest execution health. A successful execution need not have produced alerts.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[non_exhaustive]
+pub struct RuleExecution {
+    pub status: String,
+    pub date: String,
+    pub message: String,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -219,14 +240,23 @@ pub struct RulePage {
     pub total: u64,
 }
 
-/// HTTP 200 can contain failed imports; inspect `success` and `errors`.
+/// HTTP 200 can contain failed imports. `success` covers only rules; inspect
+/// exception and connector outcomes separately.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct RuleImportResult {
     pub success: bool,
     pub success_count: u64,
     #[serde(default)]
-    pub errors: Vec<Value>,
+    pub errors: Vec<ImportFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub exceptions_success: Option<bool>,
+    #[serde(default)]
+    pub exceptions_errors: Vec<ImportFailure>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub action_connectors_success: Option<bool>,
+    #[serde(default)]
+    pub action_connectors_errors: Vec<ImportFailure>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

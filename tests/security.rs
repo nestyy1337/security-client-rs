@@ -13,8 +13,46 @@ fn rule(id: &str) -> Value {
         "id": id, "rule_id": "stable-id", "name": "Failed logins", "description": "d",
         "enabled": false, "severity": "high", "risk_score": 73, "type": "query",
         "query": "event.outcome: failure", "tags": ["soc"], "updated_at": "2026-09-28T00:00:00Z",
-        "exceptions_list": [], "execution_summary": {"last_execution": {"status": "succeeded"}}
+        "exceptions_list": [], "execution_summary": {"last_execution": {
+            "status": "succeeded", "date": "2026-09-28T00:00:00Z", "message": "",
+            "status_order": 0, "metrics": {"total_search_duration_ms": 3}
+        }}
     })
+}
+
+#[tokio::test]
+async fn successful_rule_import_can_still_report_failed_dependencies() {
+    let mock = Mock::start().await;
+    mock.json(json!({
+        "success": true, "success_count": 1, "errors": [],
+        "exceptions_success": false,
+        "exceptions_errors": [{"list_id": "missing", "error": {"status_code": 409, "message": "conflict"}}],
+        "action_connectors_success": false,
+        "action_connectors_errors": [{"id": "connector", "error": {"status_code": 403, "message": "forbidden"}}],
+        "action_connectors_warnings": [{"type": "missing_secrets"}]
+    }));
+    let result = mock
+        .client()
+        .security()
+        .import_rules(b"{}\n".to_vec())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(result.success);
+    assert_eq!(result.exceptions_success, Some(false));
+    assert_eq!(
+        result.exceptions_errors[0].list_id.as_deref(),
+        Some("missing")
+    );
+    assert_eq!(result.action_connectors_success, Some(false));
+    assert_eq!(result.action_connectors_errors[0].error.status_code, 403);
+    assert_eq!(
+        result.extra["action_connectors_warnings"][0]["type"],
+        "missing_secrets"
+    );
 }
 
 #[tokio::test]
@@ -73,7 +111,12 @@ async fn find_rules_sends_only_selected_options_and_decodes_pages() {
     assert_eq!((page.page, page.per_page, page.total), (2, 1, 3));
     assert_eq!(page.data[0].severity, "high");
     assert_eq!(
-        page.data[0].extra["execution_summary"]["last_execution"]["status"],
+        page.data[0]
+            .execution_summary
+            .as_ref()
+            .unwrap()
+            .last_execution
+            .status,
         "succeeded"
     );
     mock.take().route(
@@ -290,7 +333,7 @@ async fn exports_stream_ndjson_and_imports_upload_multipart_with_partial_failure
         .route("POST", "/s/soc/api/detection_engine/rules/_export", &[])
         .no_body();
 
-    mock.json(json!({"success": false, "success_count": 0, "errors": [{"rule_id": "a", "error": {"status_code": 409}}],
+    mock.json(json!({"success": false, "success_count": 0, "errors": [{"rule_id": "a", "error": {"status_code": 409, "message": "conflict"}}],
                      "rules_count": 1, "exceptions_success": true}));
     let result = client
         .security()
@@ -306,7 +349,9 @@ async fn exports_stream_ndjson_and_imports_upload_multipart_with_partial_failure
         .await
         .unwrap();
     assert!(!result.success);
-    assert_eq!(result.errors[0]["error"]["status_code"], 409);
+    assert_eq!(result.errors[0].error.status_code, 409);
+    assert_eq!(result.errors[0].rule_id.as_deref(), Some("a"));
+    assert_eq!(result.exceptions_success, Some(true));
     assert_eq!(result.extra["rules_count"], 1);
     let request = mock.take();
     request.route(

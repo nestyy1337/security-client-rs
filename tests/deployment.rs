@@ -393,7 +393,7 @@ fn successful_action(action: &AgentActionStatus) {
     assert_eq!(action.nb_agents_failed, 0, "{action:?}");
 }
 
-async fn agent_tags(client: &Kibana, agent_id: &str) -> Vec<Value> {
+async fn agent_tags(client: &Kibana, agent_id: &str) -> Vec<String> {
     let agent = client
         .fleet()
         .get_agent(agent_id)
@@ -404,7 +404,7 @@ async fn agent_tags(client: &Kibana, agent_id: &str) -> Vec<Value> {
         .await
         .unwrap()
         .item;
-    agent.extra["tags"].as_array().cloned().unwrap_or_default()
+    agent.tags.unwrap_or_default()
 }
 
 #[tokio::test]
@@ -453,7 +453,7 @@ async fn fleet_agent_bulk_actions_and_diagnostics() {
     assert!(
         agent_tags(&client, &agent_id)
             .await
-            .contains(&json!("owned-fixture"))
+            .contains(&"owned-fixture".to_owned())
     );
 
     let target = fleet
@@ -586,7 +586,7 @@ async fn fleet_agent_bulk_actions_and_diagnostics() {
     assert!(
         !agent_tags(&client, &agent_id)
             .await
-            .contains(&json!("owned-fixture"))
+            .contains(&"owned-fixture".to_owned())
     );
 }
 
@@ -742,16 +742,15 @@ async fn agent_policy_delivery_ingestion_reassignment_and_unenrollment() {
             .await
             .unwrap();
         let execution = current
-            .extra
-            .get("execution_summary")
-            .and_then(|summary| summary.get("last_execution"))
-            .unwrap_or(&Value::Null);
-        if execution["status"] == "succeeded" {
+            .execution_summary
+            .as_ref()
+            .map(|summary| &summary.last_execution);
+        if execution.is_some_and(|execution| execution.status == "succeeded") {
             break;
         }
         assert!(
             Instant::now() < deadline,
-            "Rule did not execute with exceptions: {execution}"
+            "Rule did not execute with exceptions: {execution:?}"
         );
         tokio::time::sleep(Duration::from_secs(2)).await;
     }

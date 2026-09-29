@@ -447,6 +447,8 @@ async fn fleet_enrollment_key_lifecycle_and_pagination() {
 #[tokio::test]
 #[ignore = "requires a dedicated live Kibana deployment"]
 async fn detection_rules_crud_export_import_and_space_isolation() {
+    use serde_json::{Value, json};
+
     let root = client();
     let (space_id, client) = space(&root).await;
     let result: Result<()> = async {
@@ -517,6 +519,47 @@ async fn detection_rules_crud_export_import_and_space_isolation() {
             .await?;
         assert!(!duplicate.success);
         assert!(!duplicate.errors.is_empty());
+
+        let fresh_id = format!("krs-import-{}", uuid::Uuid::new_v4());
+        let mut fresh: Value = String::from_utf8_lossy(&bytes)
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|value| value["rule_id"] == rule.rule_id)
+            .unwrap();
+        fresh["rule_id"] = json!(fresh_id);
+        fresh.as_object_mut().unwrap().remove("id");
+        let mut mixed = format!("{fresh}\n").into_bytes();
+        mixed.extend_from_slice(&bytes);
+        let partial = security
+            .import_rules(mixed)
+            .overwrite(false)
+            .send()
+            .await?
+            .json()
+            .await?;
+        assert!(!partial.success, "{partial:?}");
+        assert_eq!(partial.success_count, 1, "{partial:?}");
+        assert_eq!(partial.errors.len(), 1, "{partial:?}");
+        assert_eq!(
+            partial.errors[0].rule_id.as_deref(),
+            Some(rule.rule_id.as_str())
+        );
+        assert_eq!(partial.errors[0].error.status_code, 409);
+        assert_eq!(
+            security
+                .get_rule(RuleSelector::RuleId(&fresh_id))
+                .send()
+                .await?
+                .json()
+                .await?
+                .rule_id,
+            fresh_id
+        );
+        security
+            .delete_rule(RuleSelector::RuleId(&fresh_id))
+            .send()
+            .await?;
+
         security
             .delete_rule(RuleSelector::Id(&rule.id))
             .send()
@@ -559,9 +602,15 @@ async fn security_cases_comments_and_version_conflicts() {
             .await?;
         assert_eq!(case.owner, "securitySolution");
         assert_eq!(cases.find().send().await?.json().await?.total, 1);
-        let change = || CasePatch::new(&case.id, &case.version).status(CaseStatus::InProgress);
+        let change = || {
+            CasePatch::new(&case.id, &case.version)
+                .status(CaseStatus::InProgress)
+                .field("category", "Authentication")
+                .unwrap()
+        };
         let changed = cases.update([change()]).send().await?.json().await?;
         assert_eq!(changed[0].status, "in-progress");
+        assert_eq!(changed[0].extra["category"], "Authentication");
         assert_eq!(status(cases.update([change()]).send().await), 409);
         let commented = cases
             .add_comment(

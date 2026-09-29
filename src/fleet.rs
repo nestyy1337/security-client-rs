@@ -365,7 +365,12 @@ pub struct Agent {
     pub status: Option<String>,
     #[serde(default)]
     pub local_metadata: Value,
-    /// Fields such as `policy_revision`, `tags` and `last_checkin`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub policy_revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checkin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tags: Option<Vec<String>>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -374,8 +379,9 @@ pub struct Agent {
 pub struct Fleet<'a>(pub(crate) &'a Kibana);
 
 impl AgentActionStatus {
-    /// Whether the action can no longer progress: `COMPLETE`, `FAILED`,
-    /// `CANCELLED`, `EXPIRED` or `ROLLOUT_PASSED`. Check the failure counts too.
+    /// Whether the waiter stops for this status: `COMPLETE`, `FAILED`,
+    /// `CANCELLED`, `EXPIRED` or `ROLLOUT_PASSED`. Inspect the status and failure
+    /// counts; late acknowledgments can still change expired or elapsed rollouts.
     pub fn is_finished(&self) -> bool {
         matches!(
             self.status.as_str(),
@@ -395,8 +401,10 @@ impl AgentUpload {
 }
 
 impl<'a> Fleet<'a> {
-    /// Waits until an agent action finishes. The action is looked up among the
-    /// 100 most recent actions, so start waiting soon after submitting it.
+    /// Waits until an agent action reaches a status accepted by [`AgentActionStatus::is_finished`].
+    /// Searches progressively larger history windows, up to 10,000 action documents.
+    /// Bulk actions can occupy multiple documents; older actions may remain outside
+    /// this window. The deadline covers the entire lookup.
     pub async fn wait_for_action(
         &self,
         action_id: &str,
@@ -405,14 +413,24 @@ impl<'a> Fleet<'a> {
         poll::wait(
             options,
             || async {
-                let actions = self
-                    .agent_action_status()
-                    .per_page(100)
-                    .send()
-                    .await?
-                    .json()
-                    .await?;
-                Ok(actions.items.into_iter().find(|a| a.action_id == action_id))
+                // Kibana deduplicates action documents before applying the page offset.
+                // Grow page zero so duplicate documents cannot hide an older action.
+                for size in [100, 1_000, 10_000] {
+                    let actions = self
+                        .agent_action_status()
+                        .page(0)
+                        .per_page(size)
+                        .send()
+                        .await?
+                        .json()
+                        .await?;
+                    if let Some(action) =
+                        actions.items.into_iter().find(|a| a.action_id == action_id)
+                    {
+                        return Ok(Some(action));
+                    }
+                }
+                Ok(None)
             },
             AgentActionStatus::is_finished,
         )
@@ -462,9 +480,7 @@ impl<'a> Fleet<'a> {
                 agent.policy_id.as_deref() == Some(policy_id)
                     && agent.status.as_deref() == Some("online")
                     && agent
-                        .extra
-                        .get("policy_revision")
-                        .and_then(Value::as_u64)
+                        .policy_revision
                         .is_some_and(|current| current >= revision)
             },
         )

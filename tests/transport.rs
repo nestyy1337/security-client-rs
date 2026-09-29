@@ -472,6 +472,30 @@ async fn debug_output_omits_proxy_passwords_query_values_and_bodies() {
 }
 
 #[tokio::test]
+async fn response_and_decode_error_diagnostics_do_not_expose_values() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    mock.json(json!("body-secret"));
+    let response = client
+        .request(Method::GET, Scope::Global, &["api", "status"])
+        .query(&[("token", "query-secret")])
+        .send()
+        .await
+        .unwrap();
+    assert!(response.url().as_str().contains("query-secret"));
+    assert!(!format!("{response:?}").contains("query-secret"));
+
+    let error = response.json_as::<u64>().await.unwrap_err();
+    assert_eq!(error.body(), Some("\"body-secret\""));
+    let mut cause: Option<&dyn std::error::Error> = Some(&error);
+    while let Some(error) = cause {
+        assert!(!format!("{error}").contains("body-secret"));
+        assert!(!format!("{error:?}").contains("body-secret"));
+        cause = error.source();
+    }
+}
+
+#[tokio::test]
 async fn an_interrupted_error_body_keeps_status_headers_and_partial_body() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();

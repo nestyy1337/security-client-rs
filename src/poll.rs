@@ -4,7 +4,7 @@
 //! the future cancels the wait.
 use std::{future::Future, time::Duration};
 
-use tokio::time::{Instant, sleep};
+use tokio::time::{Instant, sleep, timeout_at};
 
 use crate::Result;
 
@@ -16,7 +16,8 @@ pub struct PollOptions {
 }
 
 impl PollOptions {
-    /// Checks every two seconds until `timeout` has passed.
+    /// Checks every two seconds until `timeout` has passed, including in-flight requests.
+    /// A zero timeout returns immediately without sending a request.
     pub fn new(timeout: Duration) -> Self {
         Self {
             timeout,
@@ -70,15 +71,83 @@ where
     Fut: Future<Output = Result<Option<T>>>,
 {
     let deadline = Instant::now() + options.timeout;
+    let mut last = None;
     loop {
-        let last = match observe().await? {
-            Some(state) if finished(&state) => return Ok(WaitOutcome::Finished(state)),
-            last => last,
+        if Instant::now() >= deadline {
+            return Ok(WaitOutcome::TimedOut { last });
+        }
+        let observed = match timeout_at(deadline, observe()).await {
+            Ok(result) => result?,
+            Err(_) => return Ok(WaitOutcome::TimedOut { last }),
         };
+        if let Some(state) = observed {
+            if Instant::now() < deadline && finished(&state) {
+                return Ok(WaitOutcome::Finished(state));
+            }
+            last = Some(state);
+        }
         let now = Instant::now();
         if now >= deadline {
             return Ok(WaitOutcome::TimedOut { last });
         }
         sleep(options.interval.min(deadline - now)).await;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn slow_observations_cannot_finish_after_the_deadline() {
+        let start = Instant::now();
+        let timeout = Duration::from_millis(20);
+        let outcome = wait(
+            PollOptions::new(timeout),
+            || async {
+                sleep(Duration::from_millis(150)).await;
+                Ok(Some(1))
+            },
+            |_| true,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, WaitOutcome::TimedOut { last: None }));
+        assert_eq!(start.elapsed(), timeout);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn missing_observations_keep_the_last_state_and_stop_at_the_deadline() {
+        let calls = Cell::new(0);
+        let outcome = wait(
+            PollOptions::new(Duration::from_millis(25)).interval(Duration::from_millis(10)),
+            || {
+                let call = calls.get();
+                calls.set(call + 1);
+                std::future::ready(Ok((call == 0).then_some(7)))
+            },
+            |_| false,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, WaitOutcome::TimedOut { last: Some(7) }));
+        assert_eq!(calls.get(), 3);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn an_expired_deadline_does_not_start_an_observation() {
+        let outcome = wait::<(), _, _>(
+            PollOptions::new(Duration::ZERO),
+            || async { panic!("an expired wait must not send a request") },
+            |_| true,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(outcome, WaitOutcome::TimedOut { last: None }));
     }
 }

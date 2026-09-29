@@ -120,7 +120,7 @@ async fn waiting_for_an_action_returns_its_final_state_or_the_last_seen_state() 
     mock.take().route(
         "GET",
         "/api/fleet/agents/action_status",
-        &[("perPage", "100")],
+        &[("page", "0"), ("perPage", "100")],
     );
 
     for _ in 0..100 {
@@ -182,7 +182,7 @@ async fn waiting_for_uploads_and_policy_acknowledgment() {
         .unwrap()
         .finished()
         .unwrap();
-    assert_eq!(acknowledged.extra["policy_revision"], 2);
+    assert_eq!(acknowledged.policy_revision, Some(2));
     mock.take()
         .route("GET", "/s/soc/api/fleet/agents/agent", &[]);
 
@@ -197,6 +197,35 @@ async fn waiting_for_uploads_and_policy_acknowledgment() {
         404,
         "request errors end the wait"
     );
+}
+
+#[tokio::test]
+async fn waiting_for_an_action_expands_history_even_when_documents_are_deduplicated() {
+    let mock = Mock::start().await;
+    let action = |id: String| {
+        json!({"actionId": id, "type": "UPDATE_TAGS", "status": "COMPLETE",
+               "nbAgentsActionCreated": 1, "nbAgentsAck": 1, "nbAgentsFailed": 0,
+               "nbAgentsActioned": 1})
+    };
+    mock.json(json!({"items": [action("new".into())]}));
+    mock.json(json!({"items": [action("new".into())]}));
+    mock.json(json!({"items": [action("new".into()), action("old".into())]}));
+
+    let result = mock
+        .client()
+        .fleet()
+        .wait_for_action("old", fast())
+        .await
+        .unwrap();
+    assert_eq!(result.finished().unwrap().action_id, "old");
+    for size in ["100", "1000", "10000"] {
+        mock.take().route(
+            "GET",
+            "/api/fleet/agents/action_status",
+            &[("page", "0"), ("perPage", size)],
+        );
+    }
+    assert_eq!(mock.request_count(), 0);
 }
 
 #[tokio::test]

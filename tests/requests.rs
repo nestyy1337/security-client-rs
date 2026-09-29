@@ -6,7 +6,7 @@ use std::collections::BTreeMap;
 use common::Mock;
 use kibana_rs::{
     Error, Scope,
-    cases::CaseStatus,
+    cases::{CasePatch, CaseStatus},
     http::{Body, Method},
     security::{RuleSelector, Severity},
 };
@@ -51,6 +51,63 @@ async fn serialization_failures_are_reported_by_send_without_a_request() {
     for error in failures {
         assert!(matches!(error, Error::Serialize(_)), "{error:?}");
     }
+    assert_eq!(mock.request_count(), 0);
+    assert!(matches!(
+        CasePatch::new("a", "v1").field("customFields", unserializable()),
+        Err(Error::Serialize(_))
+    ));
+}
+
+#[tokio::test]
+async fn named_builders_can_extend_a_request_without_rebuilding_it() {
+    use kibana_rs::http::headers::{HeaderName, HeaderValue};
+    use std::time::Duration;
+
+    let mock = Mock::start_at("/proxy").await;
+    let client = mock.soc();
+    mock.json(json!({}));
+    client
+        .security()
+        .patch_rule(RuleSelector::RuleId("r"))
+        .enabled(true)
+        .header(
+            HeaderName::from_static("x-opaque-id"),
+            HeaderValue::from_static("extended"),
+        )
+        .into_request()
+        .query(&[("refresh", "wait_for")])
+        .send()
+        .await
+        .unwrap();
+    let request = mock.take();
+    request
+        .route(
+            "PATCH",
+            "/proxy/s/soc/api/detection_engine/rules",
+            &[("refresh", "wait_for")],
+        )
+        .body(json!({"rule_id": "r", "enabled": true}));
+    assert_eq!(request.header("x-opaque-id"), Some("extended"));
+
+    mock.reply_after(Duration::from_secs(1));
+    let error = client
+        .status()
+        .request_timeout(Duration::from_millis(20))
+        .into_request()
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(error, Error::Transport(e) if e.is_timeout()));
+    mock.take().route("GET", "/proxy/api/status", &[]);
+
+    let error = client
+        .cases()
+        .get("")
+        .into_request()
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(error, Error::InvalidRequest(_)));
     assert_eq!(mock.request_count(), 0);
 }
 
