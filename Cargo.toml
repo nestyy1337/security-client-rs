@@ -7,9 +7,13 @@ description = "Async Kibana client for security operations and Fleet management"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/nestyy1337/security-client-rs"
 readme = "README.md"
+documentation = "https://docs.rs/kibana-rs"
 keywords = ["kibana", "elastic", "siem", "security", "fleet"]
 categories = ["api-bindings", "web-programming::http-client"]
-include = ["/src/**/*.rs", "/examples/**/*.rs", "/tests/*.rs", "/tests/common/*.rs", "/README.md", "/CHANGELOG.md", "/LICENSE-APACHE", "/LICENSE-MIT"]
+include = ["/src/**/*.rs", "/examples/**/*.rs", "/tests/*.rs", "/tests/common/*.rs", "/docs/*.md", "/README.md", "/CHANGELOG.md", "/LICENSE-APACHE", "/LICENSE-MIT"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = []
@@ -39,5 +43,5 @@ axum = "0.8"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
 serde_json = "1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "fs", "io-util"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "fs", "io-util", "test-util"] }
 uuid = { version = "1", features = ["v4"] }

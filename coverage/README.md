@@ -20,6 +20,14 @@ The check fails when:
 - a builder has no offline test in `tests/`;
 - the committed report is out of date.
 
+Optional `live_evidence` entries name a `file.rs:scenario` and a reviewed outcome,
+`success` or `rejection`. The check verifies that the scenario and a live builder
+call still exist; reviewing the assertions is a human task. Unreviewed live calls
+remain labeled `called`. These labels do not imply a passing deployment run.
+The [supported workflow review](../docs/supported-contracts.md) records the
+request/response subsets checked against both supported versions. This tool does
+not validate complete schemas.
+
 Builders are found by convention: a public namespace method taking `&self` that builds exactly one `.request(Method::X, Scope::Y, &[...])`. Any other public `&self` method in an endpoint module fails the check unless it is listed in `NON_ENDPOINTS`.
 
 To move to a new Kibana version, update `upstream.json`, run `--missing` and `--check`, and review changed operations before regenerating.

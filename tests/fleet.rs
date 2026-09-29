@@ -156,7 +156,8 @@ async fn agents_are_listed_read_and_managed_individually() {
         .await
         .unwrap()
         .item;
-    assert_eq!(fetched.extra["policy_revision"], 3);
+    assert_eq!(fetched.policy_revision, Some(3));
+    assert_eq!(fetched.tags.as_deref(), Some(&["dmz".to_owned()][..]));
     mock.take()
         .route("GET", "/s/soc/api/fleet/agents/a%2F1", &[]);
 

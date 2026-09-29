@@ -7,7 +7,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use url::Url;
 
-use crate::{Error, Result};
+use crate::{DecodeError, Error, Result};
 
 /// Marker for endpoints that answer without a body.
 pub enum Empty {}
@@ -102,7 +102,7 @@ impl<T> Response<T> {
                     &body[..body.len().min(super::transport::ERROR_LIMIT)],
                 )
                 .into_owned(),
-                source,
+                source: DecodeError(source),
             }
         })
     }
@@ -116,9 +116,11 @@ impl<T: DeserializeOwned> Response<T> {
 
 impl<T> fmt::Debug for Response<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let mut url = self.url().clone();
+        url.set_query(None);
         f.debug_struct("Response")
             .field("status", &self.status_code())
-            .field("url", self.url())
+            .field("url", &url)
             .finish_non_exhaustive()
     }
 }

@@ -415,7 +415,8 @@ async fn duplication_export_and_import_encode_required_selectors() {
         .unwrap();
     assert!(!result.success);
     assert_eq!(result.success_count, 1);
-    assert_eq!(result.errors[0]["error"]["status_code"], 409);
+    assert_eq!(result.errors[0].error.status_code, 409);
+    assert_eq!(result.errors[0].error.message, "conflict");
     assert_eq!(result.extra["success_count_exception_list_items"], 0);
     let request = mock.take();
     request.route(

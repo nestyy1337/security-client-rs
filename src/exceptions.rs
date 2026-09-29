@@ -416,7 +416,7 @@ pub struct ExceptionPage<T> {
 pub struct ImportResult {
     pub success: bool,
     pub success_count: u64,
-    pub errors: Vec<Value>,
+    pub errors: Vec<crate::ImportFailure>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

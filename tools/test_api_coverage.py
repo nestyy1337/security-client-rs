@@ -88,6 +88,24 @@ impl GetAgent<'_> {
         content = report(self.root, self.metadata, inventory(self.spec), self.rows)
         self.assertIn("| `fleet.agent` | `get-agent` | `GET /api/fleet/agents/{agentId}` | unreviewed | - |", content)
 
+    def test_reviewed_live_outcomes_require_a_scenario_and_call(self):
+        evidence = {"outcome": "rejection", "test": "live.rs:container_upgrade"}
+        self.rows[0]["live_evidence"] = evidence
+        source = self.root / "tests/live.rs"
+        source.write_text("async fn container_upgrade() { client.fleet().agent(id).send().await.unwrap_err(); }")
+        validate(self.root, inventory(self.spec), self.rows)
+        content = report(self.root, self.metadata, inventory(self.spec), self.rows)
+        self.assertIn('[rejection](../tests/live.rs "container_upgrade")', content)
+        evidence["outcome"] = "success"
+        self.assertIn('[success](../tests/live.rs "container_upgrade")', report(self.root, self.metadata, inventory(self.spec), self.rows))
+        evidence["test"] = "live.rs:missing"
+        with self.assertRaisesRegex(ValueError, "Missing live scenario"):
+            validate(self.root, inventory(self.spec), self.rows)
+        evidence["test"] = "live.rs:container_upgrade"
+        source.write_text("async fn container_upgrade() {}")
+        with self.assertRaisesRegex(ValueError, "No live call"):
+            validate(self.root, inventory(self.spec), self.rows)
+
 
 if __name__ == "__main__":
     unittest.main()

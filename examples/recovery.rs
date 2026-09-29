@@ -1,6 +1,6 @@
 //! Handling errors: retrying reads, resolving version conflicts and reconciling
 //! a mutation whose outcome is unknown. The client never retries by itself.
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use kibana_rs::{
     Error, Kibana, Result,
@@ -10,14 +10,13 @@ use kibana_rs::{
 };
 
 /// Retries a read on 429, 502, 503 and transport failures, honoring
-/// `Retry-After` and giving up at an overall deadline. Only use this for
-/// requests that are safe to repeat.
-async fn retry_read<T, F, Fut>(deadline: Duration, mut read: F) -> Result<T>
+/// `Retry-After`. Bound the entire future with `tokio::time::timeout`, as in
+/// `main`, including requests and backoff. Only repeat requests that are safe to retry.
+async fn retry_read<T, F, Fut>(mut read: F) -> Result<T>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T>>,
 {
-    let give_up = Instant::now() + deadline;
     let mut backoff = Duration::from_millis(500);
     loop {
         let error = match read().await {
@@ -33,7 +32,7 @@ where
             )
         ) || matches!(error, Error::Transport(_));
         let wait = error.retry_after().unwrap_or(backoff);
-        if !transient || Instant::now() + wait > give_up {
+        if !transient {
             return Err(error);
         }
         tokio::time::sleep(wait).await;
@@ -86,10 +85,11 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     let client =
         Kibana::new(transport).space(std::env::var("KIBANA_SPACE").unwrap_or("default".into()))?;
 
-    let status = retry_read(Duration::from_secs(60), || async {
-        client.status().send().await?.json().await
-    })
-    .await?;
+    let status = tokio::time::timeout(
+        Duration::from_secs(60),
+        retry_read(|| async { client.status().send().await?.json().await }),
+    )
+    .await??;
     println!("Kibana {}", status["version"]["number"]);
 
     let rule = QueryRule::new(

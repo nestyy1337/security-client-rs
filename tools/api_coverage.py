@@ -147,6 +147,13 @@ def validate(root, operations, rows):
         require(actual[row["wrapper"]] == expected, f"Rust route differs: {row['wrapper']}")
         require(row["contract"] in {"partial", "unreviewed"}, "Complete contracts require an explicit audit mechanism")
         require(bool(row["notes"]), f"Missing limitations: {row['wrapper']}")
+        if evidence := row.get("live_evidence"):
+            require(evidence["outcome"] in {"success", "rejection"}, f"Invalid live outcome: {row['wrapper']}")
+            file, scenario = evidence["test"].split(":", 1)
+            require(file in LIVE_TESTS, f"Not a live suite: {file}")
+            source = (root / "tests" / file).read_text()
+            require(re.search(rf"\basync fn {re.escape(scenario)}\(", source), f"Missing live scenario: {evidence['test']}")
+            require(row["wrapper"] in called(root, names, live=True), f"No live call for evidence: {row['wrapper']}")
 
 
 AREAS = ["Detection engine", "Exceptions", "Cases", "Fleet", "Spaces", "Roles", "Status", "Other APIs"]
@@ -170,15 +177,19 @@ def report(root, metadata, operations, rows):
     lines += [
         f"| **Total** | **{len(operations)}** | **{len(rows)}** | **{len(operations) - len(rows)}** |", "",
         "- Every named builder has an offline test asserting its method, path, query and body.",
-        "- **Live** marks builders called by the live test suites, which run against real Kibana deployments in CI.",
+        "- **Live** is `success` or `rejection` when a linked scenario's outcome has been reviewed; `called` records call presence only. These labels describe tests, not a fresh passing run.",
         "- **Contract** is `partial` when a known request or response option is not modeled and `unreviewed` when the full contract has not been audited.",
+        "- The [supported workflow review](supported-contracts.md) records the checked subsets, version differences and limits. Full schemas are not validated by this inventory check.",
         f"- The published total includes {sum(bool(op.get('deprecated')) for op in operations.values())} deprecated operations and some internal or placeholder routes.", "",
         "| Builder | Operation ID | Route | Contract | Live | Limits |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
     for row in sorted(rows, key=lambda r: r["wrapper"]):
         notes = row["notes"].replace("|", "\\|")
-        mark = "yes" if row["wrapper"] in live else "-"
+        mark = "called" if row["wrapper"] in live else "-"
+        if evidence := row.get("live_evidence"):
+            file, scenario = evidence["test"].split(":", 1)
+            mark = f"[{evidence['outcome']}](../tests/{file} \"{scenario}\")"
         lines.append(f"| `{row['wrapper']}` | `{row['operation_id']}` | `{row['method']} {row['path']}` | {row['contract']} | {mark} | {notes} |")
     return "\n".join(lines) + "\n"
 

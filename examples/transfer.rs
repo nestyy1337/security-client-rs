@@ -43,7 +43,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         result.success_count, result.success
     );
     for error in &result.errors {
-        println!("failed: {} {}", error["rule_id"], error["error"]["message"]);
+        println!("failed rule {:?}: {}", error.rule_id, error.error.message);
+    }
+    for error in &result.exceptions_errors {
+        println!("failed exception {:?}: {}", error.id, error.error.message);
+    }
+    for error in &result.action_connectors_errors {
+        println!("failed connector {:?}: {}", error.id, error.error.message);
     }
     Ok(())
 }

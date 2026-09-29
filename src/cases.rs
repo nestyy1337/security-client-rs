@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::{
-    Kibana, Scope, SortOrder,
+    Error, Kibana, Result, Scope, SortOrder,
     http::{Empty, Method},
     pagination::paginated,
     request::endpoint,
@@ -156,6 +156,17 @@ impl CasePatch {
             "tags",
             tags.into_iter().map(|t| Value::String(t.into())).collect(),
         )
+    }
+
+    /// Sets an additional patchable field. The case ID and concurrency version
+    /// are reserved; supply them through [`Self::new`].
+    pub fn field(self, name: &str, value: impl Serialize) -> Result<Self> {
+        if matches!(name, "id" | "version") {
+            return Err(Error::InvalidRequest(format!(
+                "case patch field {name:?} is reserved"
+            )));
+        }
+        Ok(self.set(name, serde_json::to_value(value).map_err(Error::serialize)?))
     }
 
     fn set(mut self, key: &str, value: Value) -> Self {

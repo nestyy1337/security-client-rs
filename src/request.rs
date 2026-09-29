@@ -246,7 +246,13 @@ macro_rules! endpoint {
         #[must_use = "requests do nothing until sent"]
         pub struct $name<'a>($crate::Request<'a>);
 
-        impl $name<'_> {
+        impl<'a> $name<'a> {
+            /// Converts this builder to a raw request, preserving its configured
+            /// route, scope, parameters, body, headers and timeout.
+            pub fn into_request(self) -> $crate::Request<'a> {
+                self.0.named(stringify!($name))
+            }
+
             /// Sets a header on this request only, overriding client defaults.
             pub fn header(
                 self,
@@ -262,7 +268,7 @@ macro_rules! endpoint {
             }
 
             pub async fn send(self) -> $crate::Result<$crate::http::Response<$output>> {
-                self.0.named(stringify!($name)).send_as().await
+                self.into_request().send_as().await
             }
         }
     };

@@ -8,6 +8,32 @@ use kibana_rs::{
 };
 use serde_json::{Value, json};
 
+#[tokio::test]
+async fn extra_patch_fields_preserve_case_identity_and_version() {
+    let mock = Mock::start().await;
+    let patch = CasePatch::new("a", "v1")
+        .status(CaseStatus::Closed)
+        .field("assignees", json!([{ "uid": "analyst" }]))
+        .unwrap()
+        .field("customFields", json!([]))
+        .unwrap();
+    mock.json(json!([]));
+    mock.soc().cases().update([patch]).send().await.unwrap();
+    mock.take()
+        .route("PATCH", "/s/soc/api/cases", &[])
+        .body(json!({"cases": [{
+            "id": "a", "version": "v1", "status": "closed",
+            "assignees": [{"uid": "analyst"}], "customFields": []
+        }]}));
+
+    for key in ["id", "version"] {
+        assert!(matches!(
+            CasePatch::new("a", "v1").field(key, "replacement"),
+            Err(kibana_rs::Error::InvalidRequest(_))
+        ));
+    }
+}
+
 fn case(id: &str, status: &str) -> Value {
     json!({
         "id": id, "version": "WzEsMV0=", "title": "Brute force", "description": "d",

@@ -1,8 +1,36 @@
 use std::{fmt, time::Duration};
 
 use http::{HeaderMap, StatusCode, header::RETRY_AFTER};
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 
 pub type Result<T> = std::result::Result<T, Error>;
+
+/// One object that failed during an HTTP-successful rule or exception import.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ImportFailure {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub list_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub item_id: Option<String>,
+    pub error: ImportError,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ImportError {
+    pub status_code: u16,
+    pub message: String,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
 
 /// Error responses retain their status, headers, and a bounded body.
 /// Bodies may contain operational data, so neither `Display` nor `Debug`
@@ -34,13 +62,60 @@ pub enum Error {
         status: StatusCode,
         body: String,
         #[source]
-        source: serde_json::Error,
+        source: DecodeError,
     },
     #[error("response exceeded the configured limit of {limit} bytes")]
     ResponseTooLarge { limit: usize },
     #[error("request serialization failed: {0}")]
     Serialize(#[source] Box<dyn std::error::Error + Send + Sync>),
 }
+
+/// A JSON decoding failure whose formatting omits response values.
+/// The original Serde message is available only through [`Self::as_serde_error`].
+pub struct DecodeError(pub(crate) serde_json::Error);
+
+impl DecodeError {
+    pub fn line(&self) -> usize {
+        self.0.line()
+    }
+
+    pub fn column(&self) -> usize {
+        self.0.column()
+    }
+
+    pub fn classify(&self) -> serde_json::error::Category {
+        self.0.classify()
+    }
+
+    /// Inspects the original failure. Its message can contain response values.
+    pub fn as_serde_error(&self) -> &serde_json::Error {
+        &self.0
+    }
+}
+
+impl fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "JSON {:?} error at line {} column {}",
+            self.classify(),
+            self.line(),
+            self.column()
+        )
+    }
+}
+
+impl fmt::Debug for DecodeError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DecodeError")
+            .field("category", &self.classify())
+            .field("line", &self.line())
+            .field("column", &self.column())
+            .finish()
+    }
+}
+
+impl std::error::Error for DecodeError {}
 
 impl Error {
     pub fn status(&self) -> Option<StatusCode> {
