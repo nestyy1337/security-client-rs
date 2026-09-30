@@ -1,0 +1,532 @@
+{
+  "query-create": {
+    "wrapper": "security.create_rule",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "request": {
+      "type": "query",
+      "name": "Failed logins",
+      "description": "Repeated authentication failures",
+      "query": "event.outcome: failure",
+      "language": "kuery",
+      "index": [
+        "logs-*"
+      ],
+      "severity": "medium",
+      "risk_score": 47,
+      "enabled": false,
+      "interval": "5m",
+      "from": "now-6m",
+      "tags": [],
+      "rule_id": "fixture-rule"
+    }
+  },
+  "query-response": {
+    "wrapper": "security.get_rule",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "response": {
+      "status": 200,
+      "body": {
+        "type": "query",
+        "name": "Failed logins",
+        "description": "Repeated authentication failures",
+        "query": "event.outcome: failure",
+        "language": "kuery",
+        "index": [
+          "logs-*"
+        ],
+        "severity": "medium",
+        "risk_score": 47,
+        "enabled": false,
+        "interval": "5m",
+        "from": "now-6m",
+        "tags": [],
+        "rule_id": "fixture-rule",
+        "id": "11111111-1111-4111-8111-111111111111",
+        "version": 1,
+        "risk_score_mapping": [],
+        "severity_mapping": [],
+        "to": "now",
+        "actions": [],
+        "exceptions_list": [],
+        "author": [],
+        "false_positives": [],
+        "references": [],
+        "max_signals": 100,
+        "threat": [],
+        "setup": "",
+        "related_integrations": [],
+        "required_fields": [],
+        "immutable": false,
+        "rule_source": {
+          "type": "internal"
+        },
+        "revision": 0,
+        "created_at": "2026-09-30T12:00:00Z",
+        "updated_at": "2026-09-30T12:00:00Z",
+        "created_by": "fixture-user",
+        "updated_by": "fixture-user",
+        "execution_summary": {
+          "last_execution": {
+            "status": "succeeded",
+            "date": "2026-09-30T12:05:00Z",
+            "message": "",
+            "status_order": 0,
+            "metrics": {
+              "total_search_duration_ms": 3
+            }
+          }
+        }
+      }
+    }
+  },
+  "query-patch": {
+    "wrapper": "security.patch_rule",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "request": {
+      "id": "11111111-1111-4111-8111-111111111111",
+      "enabled": true
+    }
+  },
+  "rule-import-partial": {
+    "wrapper": "security.import_rules",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "response": {
+      "status": 200,
+      "body": {
+        "success": true,
+        "success_count": 1,
+        "rules_count": 1,
+        "errors": [],
+        "exceptions_success": false,
+        "exceptions_success_count": 0,
+        "exceptions_errors": [
+          {
+            "list_id": "fixture-list",
+            "error": {
+              "status_code": 409,
+              "message": "Fixture conflict"
+            }
+          }
+        ],
+        "action_connectors_success": false,
+        "action_connectors_success_count": 0,
+        "action_connectors_errors": [
+          {
+            "id": "fixture-connector",
+            "error": {
+              "status_code": 400,
+              "message": "Fixture dependency missing"
+            }
+          }
+        ],
+        "action_connectors_warnings": []
+      }
+    }
+  },
+  "case-update": {
+    "wrapper": "cases.update",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "request": {
+      "cases": [
+        {
+          "id": "fixture-case",
+          "version": "WzAsMV0=",
+          "status": "closed",
+          "description": "Resolved",
+          "tags": []
+        }
+      ]
+    },
+    "response": {
+      "status": 200,
+      "body": [
+        {
+          "id": "fixture-case",
+          "version": "WzEsMV0=",
+          "title": "Failed logins",
+          "description": "Resolved",
+          "owner": "securitySolution",
+          "status": "closed",
+          "severity": "medium",
+          "tags": [],
+          "created_at": "2026-09-30T12:00:00Z",
+          "updated_at": "2026-09-30T12:01:00Z",
+          "closed_at": "2026-09-30T12:01:00Z",
+          "duration": 60,
+          "created_by": {
+            "username": "fixture-user",
+            "full_name": null,
+            "email": null
+          },
+          "updated_by": {
+            "username": "fixture-user",
+            "full_name": null,
+            "email": null
+          },
+          "closed_by": {
+            "username": "fixture-user",
+            "full_name": null,
+            "email": null
+          },
+          "comments": [],
+          "observables": [],
+          "totalAlerts": 0,
+          "totalComment": 0,
+          "total_observables": 0,
+          "assignees": [],
+          "external_service": null,
+          "connector": {
+            "id": "none",
+            "name": "none",
+            "type": ".none",
+            "fields": null
+          },
+          "settings": {
+            "syncAlerts": false
+          }
+        }
+      ]
+    }
+  },
+  "case-extended-fields": {
+    "wrapper": "cases.update",
+    "versions": [
+      "9.5.4"
+    ],
+    "request": {
+      "cases": [
+        {
+          "id": "fixture-case",
+          "version": "WzAsMV0=",
+          "extended_fields": {
+            "priority_as_keyword": "high"
+          }
+        }
+      ]
+    }
+  },
+  "exception-item-edit": {
+    "wrapper": "exceptions.update_item",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "request": {
+      "id": "fixture-item",
+      "_version": "WzIsMV0=",
+      "namespace_type": "single",
+      "type": "simple",
+      "name": "Updated scanner",
+      "description": "Known scanner",
+      "entries": [
+        {
+          "type": "match",
+          "field": "host.name",
+          "operator": "included",
+          "value": "scanner"
+        }
+      ],
+      "tags": [],
+      "os_types": [],
+      "comments": []
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "id": "fixture-item",
+        "item_id": "portable-item",
+        "list_id": "fixture-list",
+        "_version": "WzIsMV0=",
+        "name": "Scanner",
+        "description": "Known scanner",
+        "namespace_type": "single",
+        "type": "simple",
+        "entries": [
+          {
+            "type": "match",
+            "field": "host.name",
+            "operator": "included",
+            "value": "scanner"
+          }
+        ],
+        "tags": [],
+        "os_types": [],
+        "comments": [],
+        "tie_breaker_id": "fixture-item",
+        "created_at": "2026-09-30T12:00:00Z",
+        "updated_at": "2026-09-30T12:01:00Z",
+        "created_by": "fixture-user",
+        "updated_by": "fixture-user"
+      }
+    }
+  },
+  "agent-policy-clear-output": {
+    "wrapper": "fleet.update_agent_policy",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "request": {
+      "name": "SOC endpoints",
+      "namespace": "default",
+      "inactivity_timeout": 3600,
+      "data_output_id": null
+    },
+    "response": {
+      "status": 200,
+      "body": {
+        "item": {
+          "id": "fixture-policy",
+          "name": "SOC endpoints",
+          "namespace": "default",
+          "revision": 3,
+          "status": "active",
+          "is_protected": false,
+          "updated_at": "2026-09-30T12:00:00Z",
+          "updated_by": "fixture-user",
+          "inactivity_timeout": 3600,
+          "description": "Retained description",
+          "monitoring_enabled": [
+            "logs"
+          ],
+          "data_output_id": null
+        }
+      }
+    }
+  },
+  "package-policy-full": {
+    "wrapper": "fleet.get_package_policy",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "response": {
+      "status": 200,
+      "body": {
+        "item": {
+          "id": "fixture-package-policy",
+          "name": "system-1",
+          "namespace": "default",
+          "enabled": true,
+          "revision": 2,
+          "version": "WzIsMV0=",
+          "package": {
+            "name": "system",
+            "version": "2.24.0"
+          },
+          "policy_ids": [
+            "fixture-policy"
+          ],
+          "inputs": [
+            {
+              "type": "logfile",
+              "enabled": true,
+              "streams": [],
+              "compiled_input": {
+                "type": "logfile"
+              },
+              "deprecated": {
+                "description": "Fixture deprecated input"
+              }
+            }
+          ],
+          "updated_at": "2026-09-30T12:01:00Z",
+          "created_at": "2026-09-30T12:00:00Z",
+          "created_by": "fixture-user",
+          "updated_by": "fixture-user"
+        }
+      }
+    }
+  },
+  "package-policy-edit": {
+    "wrapper": "fleet.update_package_policy",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "request": {
+      "name": "system-1",
+      "namespace": "default",
+      "enabled": true,
+      "version": "WzIsMV0=",
+      "package": {
+        "name": "system",
+        "version": "2.24.0"
+      },
+      "policy_ids": [
+        "fixture-policy"
+      ],
+      "inputs": [
+        {
+          "type": "logfile",
+          "enabled": true,
+          "streams": [],
+          "deprecated": {
+            "description": "Fixture deprecated input"
+          }
+        }
+      ]
+    }
+  },
+  "package-policy-simplified": {
+    "wrapper": "fleet.get_package_policy",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "response": {
+      "status": 200,
+      "body": {
+        "item": {
+          "id": "fixture-package-policy",
+          "name": "system-1",
+          "namespace": "default",
+          "enabled": true,
+          "revision": 2,
+          "version": "WzIsMV0=",
+          "package": {
+            "name": "system",
+            "version": "2.24.0"
+          },
+          "policy_ids": [
+            "fixture-policy"
+          ],
+          "inputs": {
+            "logfile": {
+              "enabled": true,
+              "deprecated": {
+                "description": "Fixture deprecated input"
+              }
+            }
+          },
+          "updated_at": "2026-09-30T12:01:00Z",
+          "created_at": "2026-09-30T12:00:00Z",
+          "created_by": "fixture-user",
+          "updated_by": "fixture-user"
+        }
+      }
+    }
+  },
+  "agent-null-revision": {
+    "wrapper": "fleet.get_agent",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "response": {
+      "status": 200,
+      "body": {
+        "item": {
+          "id": "fixture-agent",
+          "policy_id": "fixture-policy",
+          "policy_revision": null,
+          "active": true,
+          "status": "online",
+          "tags": [
+            "soc"
+          ],
+          "last_checkin": "2026-09-30T12:01:00Z",
+          "packages": [
+            "system"
+          ],
+          "type": "PERMANENT",
+          "enrolled_at": "2026-09-30T12:00:00Z",
+          "local_metadata": {
+            "host": {
+              "hostname": "fixture-host"
+            }
+          },
+          "effective_config": null
+        }
+      }
+    }
+  },
+  "action-status": {
+    "wrapper": "fleet.agent_action_status",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "response": {
+      "status": 200,
+      "body": {
+        "items": [
+          {
+            "actionId": "fixture-action",
+            "type": "POLICY_REASSIGN",
+            "status": "COMPLETE",
+            "creationTime": "2026-09-30T12:00:00Z",
+            "completionTime": "2026-09-30T12:01:00Z",
+            "nbAgentsActioned": 2,
+            "nbAgentsActionCreated": 2,
+            "nbAgentsAck": 2,
+            "nbAgentsFailed": 1
+          }
+        ]
+      }
+    }
+  },
+  "space-update": {
+    "wrapper": "spaces.update",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "request": {
+      "id": "soc",
+      "name": "SOC",
+      "description": "Security operations",
+      "disabledFeatures": [],
+      "color": "#aabbcc"
+    }
+  },
+  "role-definition": {
+    "wrapper": "roles.put",
+    "versions": [
+      "9.4.7",
+      "9.5.4"
+    ],
+    "request": {
+      "elasticsearch": {
+        "cluster": [],
+        "indices": [],
+        "run_as": []
+      },
+      "kibana": [
+        {
+          "spaces": [
+            "soc"
+          ],
+          "base": [
+            "read"
+          ],
+          "feature": {}
+        }
+      ]
+    },
+    "schema_issues": [
+      {
+        "direction": "request",
+        "path": "/kibana/0/base",
+        "kind": "ambiguous_one_of",
+        "reason": "The two base-privilege array alternatives have identical constraints, so valid arrays match both",
+        "source": "https://github.com/elastic/kibana/blob/v9.5.4/oas_docs/output/kibana.yaml"
+      }
+    ]
+  }
+}

@@ -16,8 +16,9 @@ cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-targets --all-features
 cargo test --locked --doc --all-features
 cargo doc --locked --no-deps --all-features
-uv run --with PyYAML==6.0.3 python -m unittest discover -s tools -p 'test_*.py'
+uv run --with PyYAML==6.0.3 --with openapi-schema-validator==0.9.0 --with jsonschema==4.26.0 python -m unittest discover -s tools -p 'test_*.py'
 uv run tools/api_coverage.py --fetch --check
+uv run tools/schema_contracts.py --fetch --check
 uv run python -m unittest discover -s tests/deployment -p 'test_*.py'
 uv run python -u tests/deployment/run.py --profile 9.5.4-basic
 uv run python -u tests/deployment/run.py --profile 9.4.7-basic

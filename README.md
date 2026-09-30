@@ -154,6 +154,11 @@ cargo test --workspace --all-targets --all-features
 
 Offline tests check every builder's method, path, query and body against a recording mock server. Live tests run against disposable Elastic Stack deployments; see [tests/deployment](tests/deployment/README.md). The [coverage report](docs/api-coverage.md) is generated and checked by `tools/api_coverage.py`; see [coverage](coverage/README.md).
 
+The [schema drift report](docs/schema-drift.md) compares parameters, request bodies
+and response schemas across the checksum-pinned supported versions. CI checks the
+comparison and validates retained JSON fixtures, which also exercise typed Rust
+builders and response decoding. These fixtures cover selected workflows.
+
 A Nix flake provides the toolchain for those who use it.
 
 [Release steps](docs/releasing.md) cover package verification, version tags and

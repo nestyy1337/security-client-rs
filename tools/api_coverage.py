@@ -181,7 +181,7 @@ def report(root, metadata, operations, rows):
         "- Every named builder has an offline test asserting its method, path, query and body.",
         "- **Live** is `success` or `rejection` when a linked scenario's outcome has been reviewed; `called` records call presence only. These labels describe tests, not a fresh passing run.",
         "- **Contract** is `partial` when a known request or response option is not modeled and `unreviewed` when the full contract has not been audited.",
-        "- The [supported workflow review](supported-contracts.md) records the checked subsets, version differences and limits. Full schemas are not validated by this inventory check.",
+        "- The [supported workflow review](supported-contracts.md) records the checked subsets, version differences and limits. The separate [schema drift check](schema-drift.md) compares pinned contracts and validates retained fixtures.",
         f"- The published total includes {sum(bool(op.get('deprecated')) for op in operations.values())} deprecated operations and some internal or placeholder routes.", "",
         "| Builder | Operation ID | Route | Contract | Live | Limits |",
         "| --- | --- | --- | --- | --- | --- |",
