@@ -611,7 +611,7 @@
     "operation_id": "put-fleet-agent-policies-agentpolicyid",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Same typed policy settings as creation; other settings only as caller-supplied JSON."
+    "notes": "Retrieved edits bind the policy ID, retain inactivity timeout and support null output clearing; other settings only as caller-supplied JSON. Selecting an output requires Platinum. No optimistic concurrency check."
   },
   {
     "wrapper": "fleet.update_package_policy",

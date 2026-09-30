@@ -115,6 +115,13 @@ impl GetAgent<'_> {
         with self.assertRaisesRegex(ValueError, "No live call"):
             validate(self.root, inventory(self.spec), self.rows)
 
+    def test_agent_policy_edit_helper_counts_as_an_update_call(self):
+        (self.root / "tests/live.rs").write_text("client.fleet().edit_agent_policy(&edit);")
+        self.assertEqual(
+            called(self.root, {"fleet.update_agent_policy"}, live=True),
+            {"fleet.update_agent_policy"},
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

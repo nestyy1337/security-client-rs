@@ -9,6 +9,10 @@
 //! simplified format, keyed by input and stream name. A retrieved
 //! [`PackagePolicy`] holds the full format; change it through
 //! [`PackagePolicy::edit`] to keep its existing configuration.
+//! Agent-policy edits use [`AgentPolicy::edit`] and [`Fleet::edit_agent_policy`]
+//! to retain the inactivity timeout. Optional settings are changed only when
+//! requested; [`AgentPolicyEdit::clear_data_output_id`] restores the default
+//! output with JSON null.
 //!
 //! Policy variables can hold credentials, so `Debug` output of package policies
 //! and their inputs omits variable values.
@@ -65,8 +69,8 @@ pub use actions::{
     DownloadAgentFile, ListAgentUploads, UploadStatus,
 };
 pub use agent_policies::{
-    AgentPolicy, CopyAgentPolicy, CreateAgentPolicy, DeleteAgentPolicy, DownloadAgentPolicy,
-    FindAgentPolicies, GetAgentPolicy, NewAgentPolicy, UpdateAgentPolicy,
+    AgentPolicy, AgentPolicyEdit, CopyAgentPolicy, CreateAgentPolicy, DeleteAgentPolicy,
+    DownloadAgentPolicy, FindAgentPolicies, GetAgentPolicy, NewAgentPolicy, UpdateAgentPolicy,
 };
 pub use agents::{
     Agent, AgentSelection, AgentStatus, BulkActionResult, BulkReassignAgents,

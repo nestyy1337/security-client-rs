@@ -20,11 +20,12 @@ VERBS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 NON_ENDPOINTS = {
     "client.cases", "client.default_space", "client.exceptions", "client.fleet", "client.request",
     "client.roles", "client.security", "client.space", "client.space_id", "client.spaces", "client.transport",
-    "exceptions.edit", "exceptions.reference", "fleet.as_str", "fleet.edit", "fleet.is_finished",
+    "exceptions.edit", "exceptions.reference", "fleet.as_str", "fleet.edit", "fleet.edit_agent_policy", "fleet.is_finished",
     "fleet.wait_for_action", "fleet.wait_for_agent_policy", "fleet.wait_for_upload",
 }
 # Helpers that send requests through named builders. A test calling the helper exercises them.
 HELPER_CALLS = {
+    "fleet.edit_agent_policy": {"fleet.update_agent_policy"},
     "fleet.wait_for_action": {"fleet.agent_action_status"},
     "fleet.wait_for_agent_policy": {"fleet.get_agent"},
     "fleet.wait_for_upload": {"fleet.list_agent_uploads"},

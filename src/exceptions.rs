@@ -105,6 +105,19 @@ impl ExceptionList {
 
     /// A replacement for this list that keeps its current editable fields until
     /// changed, bound to its ID, namespace and concurrency token.
+    /// Sending the edit fails locally if the retrieved token is missing or empty.
+    ///
+    /// ```no_run
+    /// use kibana_rs::exceptions::ListSelector;
+    ///
+    /// # async fn rename(client: &kibana_rs::Kibana) -> kibana_rs::Result<()> {
+    /// let exceptions = client.exceptions();
+    /// let list = exceptions.get_list(ListSelector::Id("list-id")).send().await?.json().await?;
+    /// let edit = list.edit().name("Renamed list");
+    /// exceptions.update_list(&edit).send().await?;
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn edit(&self) -> ListEdit {
         ListEdit {
             id: self.id.clone(),
@@ -202,9 +215,9 @@ impl NewList {
 /// Changes to an existing list for [`Exceptions::update_list`], created by
 /// [`ExceptionList::edit`].
 ///
-/// Kibana replaces every editable field, so the edit starts from the list as it
-/// was read. A list changed since then fails with HTTP 409; read it again and
-/// reapply the change rather than retrying the same edit.
+/// The edit keeps the retrieved writable fields, so changing the name also
+/// retains tags and metadata. A list changed since then fails with HTTP 409;
+/// read it again and reapply the change rather than retrying the same edit.
 #[derive(Clone, Debug, Serialize)]
 pub struct ListEdit {
     id: String,
@@ -654,9 +667,9 @@ impl ExceptionItem {
 /// Changes to an existing item for [`Exceptions::update_item`], created by
 /// [`ExceptionItem::edit`].
 ///
-/// Kibana replaces every editable field, so the edit starts from the item as it
-/// was read. Comments are append-only: existing comments are always kept, and
-/// only comments added with [`add_comment`](Self::add_comment) are sent. An item
+/// Kibana overwrites the item, so the edit starts from its writable fields as
+/// they were read. Comments are append-only: existing comments are always kept,
+/// and only comments added with [`add_comment`](Self::add_comment) are sent. An item
 /// changed since it was read fails with HTTP 409; read it again and reapply the
 /// change rather than retrying the same edit.
 #[derive(Clone, Debug, Serialize)]
