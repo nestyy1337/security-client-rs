@@ -2,5 +2,13 @@
   "version": "9.5.4",
   "deployment": "traditional",
   "url": "https://raw.githubusercontent.com/elastic/kibana/v9.5.4/oas_docs/output/kibana.yaml",
-  "sha256": "a5dd0f2a0fa30f2bdcba6b42c712b9bfcd89f22aef29c9bf5285328f014279d9"
+  "sha256": "a5dd0f2a0fa30f2bdcba6b42c712b9bfcd89f22aef29c9bf5285328f014279d9",
+  "comparisons": [
+    {
+      "version": "9.4.7",
+      "deployment": "traditional",
+      "url": "https://raw.githubusercontent.com/elastic/kibana/v9.4.7/oas_docs/output/kibana.yaml",
+      "sha256": "4746196c160554bc3dac4800d0f19f4848b660ad8a4f1b1be7c0eef55299d660"
+    }
+  ]
 }

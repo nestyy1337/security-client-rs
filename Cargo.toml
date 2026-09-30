@@ -10,7 +10,7 @@ readme = "README.md"
 documentation = "https://docs.rs/kibana-rs"
 keywords = ["kibana", "elastic", "siem", "security", "fleet"]
 categories = ["api-bindings", "web-programming::http-client"]
-include = ["/src/**/*.rs", "/examples/**/*.rs", "/tests/*.rs", "/tests/common/*.rs", "/docs/*.md", "/README.md", "/CHANGELOG.md", "/LICENSE-APACHE", "/LICENSE-MIT"]
+include = ["/src/**/*.rs", "/examples/**/*.rs", "/tests/*.rs", "/tests/common/*.rs", "/tests/fixtures/*.json", "/docs/*.md", "/README.md", "/CHANGELOG.md", "/LICENSE-APACHE", "/LICENSE-MIT"]
 
 [package.metadata.docs.rs]
 all-features = true

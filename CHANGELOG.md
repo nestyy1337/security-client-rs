@@ -6,6 +6,7 @@ This project follows [Semantic Versioning](https://semver.org/). Until 1.0, mino
 
 ### Added
 
+- Schema drift checks across pinned supported versions, with shared request and response fixtures validated against OpenAPI and exercised by Rust tests.
 - Resource-derived exception and package-policy edits, with namespace-carrying exception targets and append-only comments.
 - Agent-policy edits that retain the retrieved inactivity timeout, and explicit clearing of data output selections with JSON null.
 - Forward-compatible Fleet action and upload statuses, and `WaitOutcome::Vanished` for resources that disappear after being seen.
