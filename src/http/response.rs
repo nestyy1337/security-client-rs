@@ -1,7 +1,7 @@
 use std::{fmt, marker::PhantomData};
 
 use bytes::Bytes;
-use futures_util::{Stream, StreamExt, TryStreamExt};
+use futures_util::{Stream, StreamExt};
 use http::{HeaderMap, StatusCode};
 use serde::de::DeserializeOwned;
 use serde_json::Value;
@@ -119,11 +119,25 @@ impl<T> Response<T> {
         Ok(String::from_utf8_lossy(&self.bytes().await?).into_owned())
     }
 
-    /// Streams the body without the transport's size limit. Inspect the status
-    /// and headers first; stream errors are plain [`Error::Transport`] values,
-    /// and no body trace event is emitted.
-    pub fn bytes_stream(self) -> impl Stream<Item = Result<Bytes>> + Send {
-        self.inner.bytes_stream().map_err(Error::from)
+    /// Streams the body without the transport's size limit. Failures return
+    /// [`Error::Body`] with the status, headers and number of bytes delivered
+    /// before the failure. No body trace event is emitted.
+    pub fn bytes_stream(mut self) -> impl Stream<Item = Result<Bytes>> + Send {
+        let status = self.inner.status();
+        let headers = std::mem::take(self.inner.headers_mut());
+        let mut received = 0_usize;
+        self.inner.bytes_stream().map(move |chunk| match chunk {
+            Ok(bytes) => {
+                received = received.saturating_add(bytes.len());
+                Ok(bytes)
+            }
+            Err(source) => Err(Error::Body {
+                status,
+                headers: Box::new(headers.clone()),
+                received,
+                source: TransportError::from(source),
+            }),
+        })
     }
 
     /// Decodes the body into a type other than the endpoint's default.

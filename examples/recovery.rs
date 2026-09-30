@@ -68,7 +68,9 @@ where
 /// outcome unknown, and a retry after a lost response fails with 409 because
 /// the rule exists. Either way the stable `rule_id` lets the caller read back
 /// instead of creating a duplicate. The whole send-and-decode operation is
-/// checked, since the body can fail after Kibana has answered.
+/// checked, since the body can fail after Kibana has answered, including when
+/// it exceeds the configured size limit. Read-back uses the same limit and
+/// can fail too; recovery does not automatically raise it.
 async fn create_or_find(client: &Kibana, rule: &QueryRule, rule_id: &str) -> Result<DetectionRule> {
     let created = async {
         client
@@ -85,7 +87,10 @@ async fn create_or_find(client: &Kibana, rule: &QueryRule, rule_id: &str) -> Res
         Err(error)
             if matches!(
                 error,
-                Error::Transport(_) | Error::Body { .. } | Error::Decode { .. }
+                Error::Transport(_)
+                    | Error::Body { .. }
+                    | Error::Decode { .. }
+                    | Error::ResponseTooLarge { .. }
             ) || error.status() == Some(StatusCode::CONFLICT) =>
         {
             // A successful status that arrived before the failure shows Kibana
@@ -160,8 +165,69 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(test)]
+#[path = "../tests/common/mod.rs"]
+mod common;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+    use common::Mock;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn oversized_creation_responses_are_reconciled_without_repeating_the_write() {
+        let found = json!({
+            "id": "saved-rule", "rule_id": "recovery-example", "name": "Recovery example",
+            "description": "Safe to delete", "enabled": false, "severity": "low",
+            "risk_score": 21, "type": "query",
+        });
+        let limit = found.to_string().len();
+        let mut oversized = found.clone();
+        oversized["extra_setting"] = json!("x".repeat(limit));
+        let rule = QueryRule::new(
+            "Recovery example",
+            "Safe to delete",
+            "event.outcome: failure",
+        )
+        .rule_id("recovery-example");
+
+        for oversized_readback in [false, true] {
+            let mock = Mock::start().await;
+            let client = Kibana::new(
+                TransportBuilder::new(Url::parse(&mock.url).unwrap())
+                    .response_limit(limit)
+                    .build()
+                    .unwrap(),
+            );
+            mock.reply(201, oversized.to_string());
+            mock.json(if oversized_readback {
+                oversized.clone()
+            } else {
+                found.clone()
+            });
+
+            let result = create_or_find(&client, &rule, "recovery-example").await;
+            if oversized_readback {
+                assert!(matches!(
+                    result,
+                    Err(Error::ResponseTooLarge { status: StatusCode::OK, limit: actual, .. })
+                        if actual == limit
+                ));
+            } else {
+                let recovered = result.unwrap();
+                assert_eq!(recovered.id, "saved-rule");
+                assert_eq!(recovered.rule_id, "recovery-example");
+            }
+            assert_eq!(mock.request_count(), 2);
+            mock.take()
+                .route("POST", "/api/detection_engine/rules", &[]);
+            mock.take().route(
+                "GET",
+                "/api/detection_engine/rules",
+                &[("rule_id", "recovery-example")],
+            );
+        }
+    }
 
     #[tokio::test(start_paused = true)]
     async fn retry_deadline_cancels_a_slow_success() {
