@@ -295,11 +295,11 @@ endpoint! {
 impl FindCases<'_> {
     /// One-based page number.
     pub fn page(self, page: u32) -> Self {
-        Self(self.0.param("page", page))
+        Self(self.0.positive_param("page", page))
     }
 
     pub fn per_page(self, per_page: u32) -> Self {
-        Self(self.0.param("perPage", per_page))
+        Self(self.0.positive_param("perPage", per_page))
     }
 
     /// Restricts results to an owner such as [`SECURITY_OWNER`]. Repeat for several owners.
@@ -367,11 +367,11 @@ endpoint! {
 impl FindComments<'_> {
     /// One-based page number.
     pub fn page(self, page: u32) -> Self {
-        Self(self.0.param("page", page))
+        Self(self.0.positive_param("page", page))
     }
 
     pub fn per_page(self, per_page: u32) -> Self {
-        Self(self.0.param("perPage", per_page))
+        Self(self.0.positive_param("perPage", per_page))
     }
 
     pub fn sort_order(self, order: SortOrder) -> Self {

@@ -1,4 +1,6 @@
 //! Security detection rules. These are distinct from generic Kibana alerting rules.
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -56,6 +58,81 @@ impl TryFrom<u8> for RiskScore {
 
     fn try_from(score: u8) -> Result<Self> {
         Self::new(score)
+    }
+}
+
+/// When a rule runs and how far back each run searches.
+///
+/// Kibana configures these separately: `interval` is how often the rule runs
+/// and `from` is the start of each run's search window. A window no longer
+/// than the interval leaves gaps between runs whenever a run starts late or
+/// events arrive late, so this type derives `from` as the interval plus an
+/// additional lookback by which consecutive windows overlap.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RuleSchedule {
+    interval: u64,
+    additional_lookback: u64,
+}
+
+impl RuleSchedule {
+    /// Fails with [`Error::InvalidRequest`] unless both durations are whole
+    /// seconds and the interval is at least one second.
+    pub fn new(interval: Duration, additional_lookback: Duration) -> Result<Self> {
+        if interval.subsec_nanos() != 0 || additional_lookback.subsec_nanos() != 0 {
+            return Err(Error::InvalidRequest(
+                "rule schedules use whole seconds".into(),
+            ));
+        }
+        if interval.is_zero() {
+            return Err(Error::InvalidRequest(
+                "a rule interval must be at least one second".into(),
+            ));
+        }
+        Ok(Self {
+            interval: interval.as_secs(),
+            additional_lookback: additional_lookback.as_secs(),
+        })
+    }
+
+    /// Runs every `interval`, with windows overlapping by one minute.
+    pub fn every(interval: Duration) -> Result<Self> {
+        Self::new(interval, Duration::from_secs(60))
+    }
+
+    pub fn interval(self) -> Duration {
+        Duration::from_secs(self.interval)
+    }
+
+    /// How far back each run searches: the interval plus the additional lookback.
+    pub fn lookback(self) -> Duration {
+        Duration::from_secs(self.interval.saturating_add(self.additional_lookback))
+    }
+
+    fn interval_value(self) -> String {
+        date_math(self.interval)
+    }
+
+    fn lookback_value(self) -> String {
+        format!("now-{}", date_math(self.lookback().as_secs()))
+    }
+}
+
+impl Default for RuleSchedule {
+    /// Every five minutes, searching the last six.
+    fn default() -> Self {
+        Self {
+            interval: 300,
+            additional_lookback: 60,
+        }
+    }
+}
+
+/// Seconds in the largest whole Elastic time unit.
+fn date_math(seconds: u64) -> String {
+    match seconds {
+        s if s % 3600 == 0 => format!("{}h", s / 3600),
+        s if s % 60 == 0 => format!("{}m", s / 60),
+        s => format!("{s}s"),
     }
 }
 
@@ -136,7 +213,8 @@ pub struct QueryRule {
 }
 
 impl QueryRule {
-    /// A disabled KQL rule over `logs-*`, running every 5 minutes with medium severity.
+    /// A disabled KQL rule over `logs-*` with medium severity, on the default
+    /// [`RuleSchedule`]: every 5 minutes, searching the last 6.
     pub fn new(
         name: impl Into<String>,
         description: impl Into<String>,
@@ -152,8 +230,8 @@ impl QueryRule {
             severity: Severity::Medium,
             risk_score: RiskScore(47),
             enabled: false,
-            interval: "5m".into(),
-            from: "now-6m".into(),
+            interval: RuleSchedule::default().interval_value(),
+            from: RuleSchedule::default().lookback_value(),
             tags: Vec::new(),
             rule_id: None,
             exceptions_list: Vec::new(),
@@ -185,14 +263,18 @@ impl QueryRule {
         self
     }
 
-    /// How often the rule runs, for example `5m`.
-    pub fn interval(mut self, interval: impl Into<String>) -> Self {
-        self.interval = interval.into();
+    /// Sets how often the rule runs and how far back each run searches.
+    pub fn schedule(mut self, schedule: RuleSchedule) -> Self {
+        self.interval = schedule.interval_value();
+        self.from = schedule.lookback_value();
         self
     }
 
-    /// The start of each run's lookback window, for example `now-6m`.
-    pub fn from(mut self, from: impl Into<String>) -> Self {
+    /// Sets Kibana's `interval`, such as `15m`, and `from`, such as `now-20m`
+    /// or other date math, directly. Keep `from` at least one interval back,
+    /// or runs leave gaps; prefer [`schedule`](Self::schedule).
+    pub fn custom_schedule(mut self, interval: impl Into<String>, from: impl Into<String>) -> Self {
+        self.interval = interval.into();
         self.from = from.into();
         self
     }
@@ -300,7 +382,7 @@ impl<'a> Security<'a> {
                     Scope::Space,
                     &["api", "detection_engine", "rules"],
                 )
-                .query(&[rule.pair()]),
+                .selector(rule.pair()),
         )
     }
 
@@ -317,7 +399,8 @@ impl<'a> Security<'a> {
         )
     }
 
-    /// Changes only the fields set on the returned builder.
+    /// Changes only the fields set on the returned builder. The selector is
+    /// sent in the body and cannot be changed by later setters.
     pub fn patch_rule(&self, rule: RuleSelector<'_>) -> PatchRule<'a> {
         let (key, value) = rule.pair();
         PatchRule(
@@ -327,6 +410,7 @@ impl<'a> Security<'a> {
                     Scope::Space,
                     &["api", "detection_engine", "rules"],
                 )
+                .nonempty(key, value)
                 .field(key, value),
         )
     }
@@ -339,7 +423,7 @@ impl<'a> Security<'a> {
                     Scope::Space,
                     &["api", "detection_engine", "rules"],
                 )
-                .query(&[rule.pair()]),
+                .selector(rule.pair()),
         )
     }
 
@@ -384,11 +468,11 @@ endpoint! {
 impl FindRules<'_> {
     /// One-based page number.
     pub fn page(self, page: u32) -> Self {
-        Self(self.0.param("page", page))
+        Self(self.0.positive_param("page", page))
     }
 
     pub fn per_page(self, per_page: u32) -> Self {
-        Self(self.0.param("per_page", per_page))
+        Self(self.0.positive_param("per_page", per_page))
     }
 
     /// A KQL filter over rule attributes, for example `alert.attributes.enabled: true`.
@@ -419,6 +503,16 @@ endpoint! {
     /// `PATCH /api/detection_engine/rules`
     PatchRule => DetectionRule
 }
+
+/// Fields [`PatchRule::field`] refuses: the selectors, and values with validated setters.
+const RESERVED_PATCH_FIELDS: &[&str] = &[
+    "id",
+    "rule_id",
+    "risk_score",
+    "severity",
+    "interval",
+    "from",
+];
 
 impl PatchRule<'_> {
     pub fn name(self, name: &str) -> Self {
@@ -455,8 +549,31 @@ impl PatchRule<'_> {
         Self(self.0.field("exceptions_list", lists))
     }
 
-    /// Sets any other patchable rule field.
+    /// Changes how often the rule runs and how far back each run searches.
+    pub fn schedule(self, schedule: RuleSchedule) -> Self {
+        Self(
+            self.0
+                .field("interval", schedule.interval_value())
+                .field("from", schedule.lookback_value()),
+        )
+    }
+
+    /// Sets any other patchable rule field. The selectors `id` and `rule_id`,
+    /// and `risk_score`, `severity`, `interval` and `from`, which have typed setters, fail
+    /// with [`Error::InvalidRequest`]; use [`unchecked_field`](Self::unchecked_field)
+    /// to send them anyway.
     pub fn field(self, name: &str, value: impl Serialize) -> Self {
+        if RESERVED_PATCH_FIELDS.contains(&name) {
+            return Self(self.0.invalid(format!(
+                "{name:?} is set by the selector or a typed setter; use unchecked_field to override it"
+            )));
+        }
+        Self(self.0.field(name, value))
+    }
+
+    /// Sets any field without checks, including one that replaces the selector
+    /// and changes which rule is patched.
+    pub fn unchecked_field(self, name: &str, value: impl Serialize) -> Self {
         Self(self.0.field(name, value))
     }
 }

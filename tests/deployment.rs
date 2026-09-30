@@ -4,8 +4,8 @@ use kibana_rs::{
     Error, Kibana, Result,
     exceptions::{Entry, ListSelector, NewItem, NewList, Operator},
     fleet::{
-        AgentActionStatus, AgentSelection, BulkActionResult, NewAgentPolicy, NewPackagePolicy,
-        PackageRef, PolicyInput, PolicyStream,
+        ActionStatus, AgentActionStatus, AgentSelection, BulkActionResult, NewAgentPolicy,
+        NewPackagePolicy, PackageRef, PolicyInput, PolicyStream, UploadStatus,
     },
     http::{Certificate, Credentials, StatusCode, TransportBuilder, Url},
     poll::{PollOptions, WaitOutcome},
@@ -382,14 +382,12 @@ async fn wait_for_action(client: &Kibana, result: BulkActionResult) -> AgentActi
         .unwrap()
     {
         WaitOutcome::Finished(action) => action,
-        WaitOutcome::TimedOut { last } => {
-            panic!("Action {action_id} did not finish; last state: {last:?}")
-        }
+        other => panic!("Action {action_id} did not finish: {other:?}"),
     }
 }
 
 fn successful_action(action: &AgentActionStatus) {
-    assert_eq!(action.status, "COMPLETE", "{action:?}");
+    assert_eq!(action.status, ActionStatus::Complete, "{action:?}");
     assert_eq!(action.nb_agents_failed, 0, "{action:?}");
 }
 
@@ -475,7 +473,7 @@ async fn fleet_agent_bulk_actions_and_diagnostics() {
         .await
         .unwrap();
     let partial = wait_for_action(&client, task).await;
-    assert_eq!(partial.status, "FAILED", "{partial:?}");
+    assert_eq!(partial.status, ActionStatus::Failed, "{partial:?}");
     assert_eq!(partial.nb_agents_failed, 1, "{partial:?}");
     assert_eq!(partial.nb_agents_ack, 1, "{partial:?}");
     assert!(
@@ -543,11 +541,9 @@ async fn fleet_agent_bulk_actions_and_diagnostics() {
         .unwrap()
     {
         WaitOutcome::Finished(upload) => upload,
-        WaitOutcome::TimedOut { last } => {
-            panic!("Diagnostics upload did not finish; last state: {last:?}")
-        }
+        other => panic!("Diagnostics upload did not finish: {other:?}"),
     };
-    assert_eq!(upload.status, "READY", "{upload:?}");
+    assert_eq!(upload.status, UploadStatus::Ready, "{upload:?}");
     let bytes = fleet
         .download_agent_file(&upload.id, &upload.name)
         .send()
@@ -718,8 +714,7 @@ async fn agent_policy_delivery_ingestion_reassignment_and_unenrollment() {
     )
     .index(["logs-system.syslog-fixture"])
     .enabled(true)
-    .interval("1m")
-    .from("now-15m")
+    .custom_schedule("1m", "now-15m")
     .exceptions_list(vec![exception_list.reference()]);
     let rule = client
         .security()

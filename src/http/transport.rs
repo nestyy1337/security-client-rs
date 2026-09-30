@@ -9,13 +9,12 @@ use http::{
     HeaderMap, HeaderName, HeaderValue, Method,
     header::{AUTHORIZATION, CONTENT_TYPE, USER_AGENT},
 };
+use percent_encoding::percent_decode_str;
 use serde::Serialize;
 use url::Url;
 
-use futures_util::StreamExt;
-
-use super::{Body, Response, body::Content};
-use crate::{Error, Result, TransportError};
+use super::{Body, Response, body::Content, merge_headers, redacted, response::read_bounded};
+use crate::{Error, Result};
 
 /// The address used by [`Transport::single_node`] examples and local development stacks.
 pub const DEFAULT_ADDRESS: &str = "http://localhost:5601";
@@ -139,17 +138,20 @@ impl TransportBuilder {
         self
     }
 
-    /// Sends a header with every request. Per-request headers take precedence.
+    /// Sends a header with every request, replacing earlier values of the same name.
+    ///
+    /// Headers are combined in this order, each replacing every earlier value
+    /// of a name it sets: built-in defaults and credentials, these transport
+    /// headers, the body's `Content-Type`, then per-request headers.
     pub fn header(mut self, name: HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
     }
 
-    /// Sends these headers with every request, replacing earlier values for the same names.
+    /// Sends these headers with every request. Each name replaces earlier values
+    /// of that name; repeated values of one name in `headers` are all sent.
     pub fn headers(mut self, headers: HeaderMap) -> Self {
-        for (name, value) in &headers {
-            self.headers.insert(name, value.clone());
-        }
+        merge_headers(&mut self.headers, headers);
         self
     }
 
@@ -216,9 +218,7 @@ impl TransportBuilder {
         if let Some(credentials) = &self.credentials {
             headers.insert(AUTHORIZATION, credentials.header()?);
         }
-        for (name, value) in &self.headers {
-            headers.insert(name, value.clone());
-        }
+        merge_headers(&mut headers, self.headers);
 
         let mut client = reqwest::Client::builder()
             .timeout(self.timeout)
@@ -255,15 +255,10 @@ impl fmt::Debug for TransportBuilder {
         let proxy = match &self.proxy {
             Proxy::System => "system".to_owned(),
             Proxy::Disabled => "disabled".to_owned(),
-            Proxy::Url(url) => {
-                let mut url = url.clone();
-                let _ = url.set_username("");
-                let _ = url.set_password(None);
-                url.to_string()
-            }
+            Proxy::Url(url) => redacted(url),
         };
         f.debug_struct("TransportBuilder")
-            .field("url", &self.url.as_str())
+            .field("url", &redacted(&self.url))
             .field("credentials", &self.credentials)
             .field("headers", &self.headers.keys().collect::<Vec<_>>())
             .field("timeout", &self.timeout)
@@ -312,7 +307,9 @@ impl Transport {
     /// Sends one request and checks its status.
     ///
     /// `path` must already be percent-encoded and is appended to the base URL.
-    /// Non-success statuses become [`Error::Api`] with at most 16 KiB of body.
+    /// It cannot contain a query, fragment, backslash, control character or dot
+    /// segment in literal or percent-encoded form, so it always stays under the
+    /// base path. Non-success statuses become [`Error::Api`] with at most 16 KiB of body.
     pub async fn send<Q>(
         &self,
         method: Method,
@@ -352,7 +349,10 @@ impl Transport {
             .await
             .map(|response| response.named(operation));
         #[cfg(feature = "tracing")]
-        trace.finish(&result);
+        let result = {
+            trace.finish(&result);
+            result.map(|response| response.traced(trace))
+        };
         result
     }
 
@@ -368,57 +368,74 @@ impl Transport {
     where
         Q: Serialize + ?Sized,
     {
-        let mut request = self
-            .inner
-            .client
-            .request(method, self.endpoint(path, query)?)
-            .headers(self.inner.headers.clone());
+        let url = self.endpoint(path, query)?;
+        // The final headers are prepared once, so a name set at a later stage
+        // replaces every earlier value instead of being sent twice.
+        let mut final_headers = self.inner.headers.clone();
+        let mut request = self.inner.client.request(method, url);
         request = match body.map(|body| body.0) {
             None => request,
-            Some(Content::Json(bytes)) => request
-                .header(CONTENT_TYPE, HeaderValue::from_static("application/json"))
-                .body(bytes),
+            Some(Content::Json(bytes)) => {
+                final_headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
+                request.body(bytes)
+            }
             Some(Content::File {
                 field,
                 file_name,
                 content_type,
                 bytes,
-            }) => request.multipart(Content::form(field, file_name, &content_type, bytes)?),
+            }) => {
+                // Multipart sets its own Content-Type with the boundary.
+                final_headers.remove(CONTENT_TYPE);
+                request.multipart(Content::form(field, file_name, &content_type, bytes)?)
+            }
         };
-        request = request.headers(headers);
+        merge_headers(&mut final_headers, headers);
+        request = request.headers(final_headers);
         if let Some(timeout) = timeout {
             request = request.timeout(timeout);
         }
 
-        let response = request.send().await?;
+        let mut response = request.send().await?;
         let status = response.status();
         if !status.is_success() {
-            let headers = Box::new(response.headers().clone());
-            let (body, truncated, body_error) = read_error_body(response).await;
+            let headers = Box::new(std::mem::take(response.headers_mut()));
+            let body = read_bounded(response, ERROR_LIMIT).await;
             return Err(Error::Api {
                 status,
                 headers,
-                body: String::from_utf8_lossy(&body).into_owned(),
-                truncated,
-                body_error,
+                body: String::from_utf8_lossy(&body.bytes).into_owned(),
+                truncated: body.truncated,
+                body_error: body.error,
             });
         }
         Ok(Response::new(response, self.inner.response_limit))
     }
 
     fn endpoint<Q: Serialize + ?Sized>(&self, path: &str, query: Option<&Q>) -> Result<Url> {
-        if path.contains(['?', '#', '\\']) {
+        if path.contains(['?', '#', '\\']) || path.chars().any(char::is_control) {
             return Err(Error::InvalidRequest(
-                "path must not contain a query, fragment or backslash".into(),
+                "path must not contain a query, fragment, backslash or control character".into(),
+            ));
+        }
+        // URL parsing resolves `.` and `..` segments, including `%2e` forms.
+        if path.split('/').any(|segment| {
+            let decoded = percent_decode_str(segment).decode_utf8_lossy();
+            decoded == "." || decoded == ".."
+        }) {
+            return Err(Error::InvalidRequest(
+                "path must not contain dot segments".into(),
             ));
         }
         let mut url = self.inner.url.clone();
-        let joined = format!(
-            "{}/{}",
-            url.path().trim_end_matches('/'),
-            path.trim_start_matches('/')
-        );
+        let base = url.path().trim_end_matches('/').to_owned();
+        let joined = format!("{base}/{}", path.trim_start_matches('/'));
         url.set_path(&joined);
+        if !url.path().starts_with(&format!("{base}/")) {
+            return Err(Error::InvalidRequest(
+                "path must stay under the base URL path".into(),
+            ));
+        }
         if let Some(query) = query {
             let query = serde_urlencoded::to_string(query).map_err(Error::serialize)?;
             if !query.is_empty() {
@@ -435,25 +452,6 @@ impl fmt::Debug for Transport {
             .field("url", &self.inner.url.as_str())
             .finish_non_exhaustive()
     }
-}
-
-/// Reads at most [`ERROR_LIMIT`] bytes of an error body. A failure while reading
-/// keeps the bytes received so far, so the status and headers are not lost.
-async fn read_error_body(response: reqwest::Response) -> (Vec<u8>, bool, Option<TransportError>) {
-    let mut stream = response.bytes_stream();
-    let mut body = Vec::new();
-    while let Some(chunk) = stream.next().await {
-        let chunk = match chunk {
-            Ok(chunk) => chunk,
-            Err(error) => return (body, false, Some(TransportError::from(error))),
-        };
-        let remaining = ERROR_LIMIT.saturating_sub(body.len());
-        body.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
-        if chunk.len() > remaining {
-            return (body, true, None);
-        }
-    }
-    (body, false, None)
 }
 
 /// A Cloud ID is `name:base64(host[:port]$elasticsearch-id$kibana-id)`.

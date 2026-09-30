@@ -9,12 +9,42 @@ use kibana_rs::{
     cases::{CasePatch, CaseStatus},
     http::{Body, Method},
     security::{RuleSelector, Severity},
+    spaces::Space,
 };
 use serde_json::json;
 
 /// Maps with non-string keys cannot be represented as JSON objects.
 fn unserializable() -> BTreeMap<(u8, u8), u8> {
     BTreeMap::from([((1, 2), 3)])
+}
+
+#[tokio::test]
+async fn json_composition_preserves_floats_and_rejects_unsupported_integers() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    let fraction = 2.291712365432881e-9_f64;
+    mock.json(json!({}));
+    client
+        .request(Method::POST, Scope::Space, &["api", "x"])
+        .json(&BTreeMap::from([("fraction", fraction)]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        mock.take().body,
+        serde_json::to_vec(&json!({"fraction": fraction})).unwrap()
+    );
+
+    for value in [u64::MAX as u128 + 2, u128::MAX] {
+        let error = client
+            .request(Method::POST, Scope::Space, &["api", "x"])
+            .json(&BTreeMap::from([("integer", value)]))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::Serialize(_)), "{error:?}");
+    }
+    assert_eq!(mock.request_count(), 0);
 }
 
 #[tokio::test]
@@ -112,19 +142,45 @@ async fn named_builders_can_extend_a_request_without_rebuilding_it() {
 }
 
 #[tokio::test]
-async fn fields_cannot_be_merged_into_a_non_object_body() {
+async fn extension_maps_cannot_override_modeled_identity() {
     let mock = Mock::start().await;
-    let error = mock
-        .client()
-        .exceptions()
-        .update_list("id", "WzEsMV0=", &json!(["not", "an", "object"]))
-        .send()
-        .await
-        .unwrap_err();
+    let client = mock.client();
+    let mut space = Space::new("intended-space", "Intended");
+    space.extra.insert("color".into(), json!("#aabbcc"));
+    mock.json(json!({"id": "intended-space", "name": "Intended"}));
+    client.spaces().create(&space).send().await.unwrap();
+    mock.take().body(json!({
+        "id": "intended-space", "name": "Intended", "disabledFeatures": [], "color": "#aabbcc"
+    }));
+
+    space.extra.insert("id".into(), json!("other-space"));
+    let error = client.spaces().create(&space).send().await.unwrap_err();
     assert!(
         matches!(error, Error::InvalidRequest(ref message) if message.contains("\"id\"")),
         "{error:?}"
     );
+    assert!(matches!(Body::json(&space), Err(Error::InvalidRequest(_))));
+    assert_eq!(mock.request_count(), 0);
+}
+
+#[tokio::test]
+async fn every_clone_of_a_failed_request_reports_the_same_error() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    let original = client
+        .request(Method::POST, Scope::Space, &["api", "x"])
+        .json(&unserializable());
+    let copies = [original.clone(), original.clone()];
+    for copy in copies {
+        let error = copy.send().await.unwrap_err();
+        assert!(matches!(error, Error::Serialize(_)), "{error:?}");
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "the source survives sharing"
+        );
+    }
+    let error = original.send().await.unwrap_err();
+    assert!(matches!(error, Error::Serialize(_)), "{error:?}");
     assert_eq!(mock.request_count(), 0);
 }
 

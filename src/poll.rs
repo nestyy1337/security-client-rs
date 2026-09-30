@@ -1,10 +1,16 @@
 //! Deadlines for waiting on asynchronous Kibana work, such as Fleet actions.
 //!
+//! The deadline bounds the whole wait, including each observation's requests
+//! and body reads: an observation still running at the deadline is abandoned,
+//! and no observation starts at or after it. A zero timeout therefore returns
+//! [`WaitOutcome::TimedOut`] without sending a request. A state observed before
+//! the deadline is reported even if the deadline passes while it is evaluated.
+//!
 //! Waiting never retries a failed request: the first error is returned. Dropping
 //! the future cancels the wait.
 use std::{future::Future, time::Duration};
 
-use tokio::time::{Instant, sleep, timeout_at};
+use tokio::time::{Instant, sleep_until, timeout_at};
 
 use crate::Result;
 
@@ -16,8 +22,7 @@ pub struct PollOptions {
 }
 
 impl PollOptions {
-    /// Checks every two seconds until `timeout` has passed, including in-flight requests.
-    /// A zero timeout returns immediately without sending a request.
+    /// Checks every two seconds until `timeout` has passed.
     pub fn new(timeout: Duration) -> Self {
         Self {
             timeout,
@@ -25,6 +30,7 @@ impl PollOptions {
         }
     }
 
+    /// The pause between the end of one observation and the start of the next.
     pub fn interval(mut self, interval: Duration) -> Self {
         self.interval = interval;
         self
@@ -42,11 +48,18 @@ impl Default for PollOptions {
 /// as an action where some agents failed; inspect it.
 #[derive(Clone, Debug)]
 #[must_use]
+#[non_exhaustive]
 pub enum WaitOutcome<T> {
     Finished(T),
     /// The deadline passed. `last` is the most recent state observed, if any.
     TimedOut {
         last: Option<T>,
+    },
+    /// The resource was observed and then could no longer be found, for
+    /// example because it was deleted or fell outside the searched window.
+    /// `last` is the final state observed.
+    Vanished {
+        last: T,
     },
 }
 
@@ -54,13 +67,22 @@ impl<T> WaitOutcome<T> {
     pub fn finished(self) -> Option<T> {
         match self {
             Self::Finished(value) => Some(value),
-            Self::TimedOut { .. } => None,
+            Self::TimedOut { .. } | Self::Vanished { .. } => None,
+        }
+    }
+
+    /// The most recent state observed, whatever the outcome.
+    pub fn last(&self) -> Option<&T> {
+        match self {
+            Self::Finished(value) | Self::Vanished { last: value } => Some(value),
+            Self::TimedOut { last } => last.as_ref(),
         }
     }
 }
 
 /// Calls `observe` until it reports a state accepted by `finished` or the deadline passes.
-/// `observe` returns `None` while the resource is not visible yet.
+/// `observe` returns `None` while the resource is not visible. A resource that
+/// is not visible after having been observed ends the wait as vanished.
 pub(crate) async fn wait<T, F, Fut>(
     options: PollOptions,
     mut observe: F,
@@ -76,78 +98,154 @@ where
         if Instant::now() >= deadline {
             return Ok(WaitOutcome::TimedOut { last });
         }
-        let observed = match timeout_at(deadline, observe()).await {
-            Ok(result) => result?,
-            Err(_) => return Ok(WaitOutcome::TimedOut { last }),
-        };
-        if let Some(state) = observed {
-            if Instant::now() < deadline && finished(&state) {
-                return Ok(WaitOutcome::Finished(state));
-            }
-            last = Some(state);
-        }
-        let now = Instant::now();
-        if now >= deadline {
+        let Ok(observed) = timeout_at(deadline, observe()).await else {
             return Ok(WaitOutcome::TimedOut { last });
+        };
+        match (observed?, last) {
+            (Some(state), _) if finished(&state) => return Ok(WaitOutcome::Finished(state)),
+            (Some(state), _) => last = Some(state),
+            (None, Some(previous)) => return Ok(WaitOutcome::Vanished { last: previous }),
+            (None, None) => last = None,
         }
-        sleep(options.interval.min(deadline - now)).await;
+        sleep_until(deadline.min(Instant::now() + options.interval)).await;
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::cell::Cell;
+    use std::{
+        cell::{Cell, RefCell},
+        collections::VecDeque,
+    };
+
+    use tokio::time::sleep;
 
     use super::*;
 
-    #[tokio::test(start_paused = true)]
-    async fn slow_observations_cannot_finish_after_the_deadline() {
-        let start = Instant::now();
-        let timeout = Duration::from_millis(20);
-        let outcome = wait(
-            PollOptions::new(timeout),
-            || async {
-                sleep(Duration::from_millis(150)).await;
-                Ok(Some(1))
-            },
-            |_| true,
-        )
-        .await
-        .unwrap();
+    fn options(timeout: u64, interval: u64) -> PollOptions {
+        PollOptions::new(Duration::from_millis(timeout)).interval(Duration::from_millis(interval))
+    }
 
-        assert!(matches!(outcome, WaitOutcome::TimedOut { last: None }));
-        assert_eq!(start.elapsed(), timeout);
+    /// Replays scripted observations, each after a delay, counting how many started.
+    struct Script {
+        steps: RefCell<VecDeque<(u64, Option<&'static str>)>>,
+        started: Cell<usize>,
+    }
+
+    impl Script {
+        fn new(steps: &[(u64, Option<&'static str>)]) -> Self {
+            Self {
+                steps: RefCell::new(steps.iter().copied().collect()),
+                started: Cell::new(0),
+            }
+        }
+
+        async fn observe(&self) -> Result<Option<&'static str>> {
+            self.started.set(self.started.get() + 1);
+            let (delay, state) = self.steps.borrow_mut().pop_front().unwrap_or((0, None));
+            sleep(Duration::from_millis(delay)).await;
+            Ok(state)
+        }
+    }
+
+    fn done(state: &&str) -> bool {
+        *state == "done"
     }
 
     #[tokio::test(start_paused = true)]
-    async fn missing_observations_keep_the_last_state_and_stop_at_the_deadline() {
-        let calls = Cell::new(0);
-        let outcome = wait(
-            PollOptions::new(Duration::from_millis(25)).interval(Duration::from_millis(10)),
-            || {
-                let call = calls.get();
-                calls.set(call + 1);
-                std::future::ready(Ok((call == 0).then_some(7)))
-            },
+    async fn a_stalled_observation_is_bounded_by_the_deadline() {
+        let script = Script::new(&[(0, Some("running")), (10_000, Some("done"))]);
+        let started = Instant::now();
+        let outcome = wait(options(100, 10), || script.observe(), done)
+            .await
+            .unwrap();
+        assert!(
+            matches!(
+                outcome,
+                WaitOutcome::TimedOut {
+                    last: Some("running")
+                }
+            ),
+            "{outcome:?}"
+        );
+        assert_eq!(started.elapsed(), Duration::from_millis(100));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_terminal_state_arriving_after_the_deadline_is_not_reported() {
+        let script = Script::new(&[(150, Some("done"))]);
+        let outcome = wait(options(10, 10), || script.observe(), done)
+            .await
+            .unwrap();
+        assert!(
+            matches!(outcome, WaitOutcome::TimedOut { last: None }),
+            "{outcome:?}"
+        );
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_observation_starts_at_or_after_the_deadline() {
+        let script = Script::new(&[(0, Some("running")); 10]);
+        let outcome = wait(options(100, 100), || script.observe(), done)
+            .await
+            .unwrap();
+        assert!(matches!(
+            outcome,
+            WaitOutcome::TimedOut {
+                last: Some("running")
+            }
+        ));
+        assert_eq!(script.started.get(), 1, "the sleep ends at the deadline");
+
+        let script = Script::new(&[(0, Some("done"))]);
+        let outcome = wait(options(0, 10), || script.observe(), done)
+            .await
+            .unwrap();
+        assert!(matches!(outcome, WaitOutcome::TimedOut { last: None }));
+        assert_eq!(script.started.get(), 0, "a zero timeout sends nothing");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_state_that_disappears_after_being_seen_has_vanished() {
+        let script = Script::new(&[(0, None), (0, Some("running")), (0, None)]);
+        let outcome = wait(options(1_000, 10), || script.observe(), done)
+            .await
+            .unwrap();
+        assert!(
+            matches!(outcome, WaitOutcome::Vanished { last: "running" }),
+            "{outcome:?}"
+        );
+        assert_eq!(outcome.last(), Some(&"running"));
+        assert!(outcome.finished().is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn finishing_within_the_deadline_wins_and_errors_end_the_wait() {
+        let script = Script::new(&[(0, Some("running")), (90, Some("done"))]);
+        let outcome = wait(options(100, 10), || script.observe(), done)
+            .await
+            .unwrap();
+        assert_eq!(outcome.finished(), Some("done"));
+
+        let error = wait(
+            options(100, 10),
+            || async { Err::<Option<()>, _>(crate::Error::InvalidRequest("boom".into())) },
             |_| false,
         )
         .await
-        .unwrap();
-
-        assert!(matches!(outcome, WaitOutcome::TimedOut { last: Some(7) }));
-        assert_eq!(calls.get(), 3);
+        .unwrap_err();
+        assert!(matches!(error, crate::Error::InvalidRequest(_)));
     }
 
     #[tokio::test(start_paused = true)]
-    async fn an_expired_deadline_does_not_start_an_observation() {
-        let outcome = wait::<(), _, _>(
-            PollOptions::new(Duration::ZERO),
-            || async { panic!("an expired wait must not send a request") },
-            |_| true,
-        )
-        .await
-        .unwrap();
-
-        assert!(matches!(outcome, WaitOutcome::TimedOut { last: None }));
+    async fn dropping_the_wait_cancels_the_running_observation() {
+        let script = Script::new(&[(10_000, Some("done"))]);
+        let wait = wait(options(60_000, 10), || script.observe(), done);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), wait)
+                .await
+                .is_err()
+        );
+        assert_eq!(script.started.get(), 1);
     }
 }
