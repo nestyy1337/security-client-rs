@@ -123,6 +123,8 @@ impl Error {
         }
     }
 
+    /// The retained body excerpt for API or decode errors, limited to 16 KiB.
+    /// Interrupted reads and size-limit errors retain context but no body excerpt.
     pub fn body(&self) -> Option<&str> {
         match self {
             Self::Api { body, .. } | Self::Decode { body, .. } => Some(body),

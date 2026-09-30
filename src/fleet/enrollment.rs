@@ -7,12 +7,15 @@ use serde_json::Value;
 use super::{Fleet, FleetPage, Item};
 use crate::{Scope, http::Method, pagination::paginated, request::endpoint};
 
+/// A Fleet enrollment key for joining agents to a policy.
 /// Enrollment credentials are omitted from `Debug` output.
 #[derive(Clone, Deserialize)]
 #[non_exhaustive]
 pub struct EnrollmentKey {
+    /// Fleet resource ID used to retrieve or revoke this enrollment key.
     pub id: String,
     pub api_key_id: String,
+    /// Enrollment token passed to Elastic Agent.
     pub api_key: String,
     pub active: bool,
     #[serde(default)]

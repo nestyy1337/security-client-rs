@@ -4,6 +4,10 @@ An async Rust client for the Kibana HTTP API, focused on security operations: de
 
 The project is pre-1.0. It is not affiliated with or supported by Elastic.
 
+The [working notes](notes/work-in-progress.md) describe current work and rough
+edges. [Ideas and TODOs](notes/ideas-and-todos.md) are a working list, with room
+for proposals that still need a reason to implement them.
+
 ## Coverage
 
 <!-- BEGIN API COVERAGE -->
@@ -56,7 +60,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-More examples are in [examples/](examples/).
+For the next step, these examples cover complete workflows:
+
+| Task | Example |
+| --- | --- |
+| List detection rules and agent policies | [security.rs](examples/security.rs) |
+| Read collections across pages | [pagination.rs](examples/pagination.rs) |
+| Export and import, including partial failures | [transfer.rs](examples/transfer.rs) |
+| Retry reads and reconcile uncertain writes | [recovery.rs](examples/recovery.rs) |
+
+The API reference has the details of selectors, edits and response types. Build
+it locally with `cargo doc --no-deps --all-features --open`.
 
 ## How the client works
 
@@ -103,12 +117,11 @@ Non-success responses become `Error::Api` with the status, headers and up to 16 
 `Error::Body`, retaining status, headers and the count of bytes delivered before
 the failure.
 
-Bodies may contain operational data and are never printed by `Display` or `Debug`. Neither are response values quoted by decoding errors, query values, or Fleet policy variables; `DecodeError::inner()` returns the full serde error deliberately.
-
-`Error::Decode` reports the JSON error category, line and column through
-`DecodeError`, including when logging the error's source chain. The original
-Serde message can contain response values and is available explicitly through
-`DecodeError::as_serde_error`. Response `Debug` output omits query values.
+Bodies, query values and Fleet policy variables can contain operational data or
+credentials and are omitted from diagnostic output. `Error::Decode` reports the
+JSON error category, line and column through `DecodeError`, including in its
+source chain. `DecodeError::as_serde_error()` deliberately exposes the original
+Serde message, which can quote response values.
 
 The client does not retry, because whether a retry is safe depends on the request:
 
@@ -160,6 +173,7 @@ comparison and validates retained JSON fixtures, which also exercise typed Rust
 builders and response decoding. These fixtures cover selected workflows.
 
 A Nix flake provides the toolchain for those who use it.
+Prefix development commands with `nix develop -c` when using that environment.
 
 [Release steps](docs/releasing.md) cover package verification, version tags and
 publication. Before registry publication, use a Git dependency pinned with `rev`

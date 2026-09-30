@@ -1,4 +1,10 @@
 //! Security detection rules. These are distinct from generic Kibana alerting rules.
+//!
+//! [`QueryRule`] creates KQL or Lucene rules; other rule types can use JSON with
+//! [`Security::create_rule`]. Use [`RuleSelector`] to distinguish a saved-object
+//! ID from the stable rule ID. Imports can succeed for rules while failing for
+//! their dependencies; inspect [`RuleImportResult`] before treating the import
+//! as complete.
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -136,10 +142,13 @@ fn date_math(seconds: u64) -> String {
     }
 }
 
+/// A detection rule returned by Kibana. Type-specific fields are retained in `extra`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct DetectionRule {
+    /// Kibana saved-object ID, used by [`RuleSelector::Id`].
     pub id: String,
+    /// Stable rule identifier used by [`RuleSelector::RuleId`] and exports/imports.
     pub rule_id: String,
     pub name: String,
     pub description: String,
@@ -215,6 +224,20 @@ pub struct QueryRule {
 impl QueryRule {
     /// A disabled KQL rule over `logs-*` with medium severity, on the default
     /// [`RuleSchedule`]: every 5 minutes, searching the last 6.
+    ///
+    /// ```
+    /// use kibana_rs::security::{QueryRule, RuleSchedule};
+    /// use serde_json::to_value;
+    /// use std::time::Duration;
+    ///
+    /// let rule = QueryRule::new("Failed logins", "Repeated failures", "event.outcome: failure")
+    ///     .schedule(RuleSchedule::every(Duration::from_secs(600))?);
+    /// let body = to_value(rule)?;
+    /// assert_eq!(body["enabled"], false);
+    /// assert_eq!(body["interval"], "10m");
+    /// assert_eq!(body["from"], "now-11m");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn new(
         name: impl Into<String>,
         description: impl Into<String>,
@@ -563,6 +586,21 @@ impl PatchRule<'_> {
     /// and `risk_score`, `severity`, `interval` and `from`, which have typed setters, fail
     /// with [`Error::InvalidRequest`]; use [`unchecked_field`](Self::unchecked_field)
     /// to send them anyway.
+    /// Errors are returned by `send`, before HTTP, even if later setters replace
+    /// the offending field.
+    ///
+    /// ```
+    /// use kibana_rs::{Error, Kibana, http::Transport, security::RuleSelector};
+    ///
+    /// # #[tokio::main]
+    /// # async fn main() -> kibana_rs::Result<()> {
+    /// let client = Kibana::new(Transport::single_node("http://127.0.0.1:9")?);
+    /// let patch = client.security().patch_rule(RuleSelector::RuleId("failed-logins"));
+    /// let error = patch.field("rule_id", "another-rule").send().await.unwrap_err();
+    /// assert!(matches!(error, Error::InvalidRequest(_))); // No request is sent.
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn field(self, name: &str, value: impl Serialize) -> Self {
         if RESERVED_PATCH_FIELDS.contains(&name) {
             return Self(self.0.invalid(format!(

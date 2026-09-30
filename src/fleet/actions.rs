@@ -41,6 +41,18 @@ impl ActionStatus {
     /// Whether the action can no longer progress. An unknown state counts as
     /// finished, so waiting stops at a state this client cannot interpret
     /// instead of running until the deadline.
+    /// This also returns true for known failures; inspect the status before
+    /// treating the action as successful.
+    ///
+    /// ```
+    /// use kibana_rs::fleet::ActionStatus;
+    ///
+    /// assert!(ActionStatus::Failed.is_finished());
+    /// assert!(!ActionStatus::InProgress.is_finished());
+    /// let added_by_kibana = ActionStatus::from("NEW_STATUS".to_owned());
+    /// assert!(added_by_kibana.is_finished());
+    /// assert!(matches!(added_by_kibana, ActionStatus::Unknown(_)));
+    /// ```
     pub fn is_finished(&self) -> bool {
         !matches!(self, Self::InProgress)
     }

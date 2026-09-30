@@ -17,6 +17,7 @@ use crate::{
     request::endpoint,
 };
 
+/// Whether an exception list or item belongs to one space or is shared across spaces.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum NamespaceType {
@@ -70,10 +71,13 @@ impl ListReference {
     }
 }
 
+/// A retrieved exception list. Use [`Self::edit`] to retain its writable fields on update.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ExceptionList {
+    /// Kibana saved-object ID, distinct from the portable [`list_id`](Self::list_id).
     pub id: String,
+    /// Stable list identifier used in rule associations and item membership.
     pub list_id: String,
     pub name: String,
     pub description: String,
@@ -466,6 +470,7 @@ impl ValueListReference {
     }
 }
 
+/// One condition in an exception item. The item's entries are combined with AND.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
@@ -608,10 +613,14 @@ impl NewItem {
     }
 }
 
+/// A retrieved exception item and its current entries and comments.
+/// Use [`Self::edit`] to change it without dropping unchanged writable fields.
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct ExceptionItem {
+    /// Kibana saved-object ID, distinct from [`item_id`](Self::item_id).
     pub id: String,
+    /// Stable item identifier, retained across exports and imports.
     pub item_id: String,
     pub list_id: String,
     pub name: String,
@@ -646,6 +655,25 @@ impl ExceptionItem {
     /// A replacement for this item that keeps its current editable fields,
     /// including entries of types this client does not model, until changed.
     /// It is bound to the item's ID, namespace and concurrency token.
+    /// Sending the edit fails locally if the retrieved token is missing or empty.
+    /// Existing comments stay on the server; only newly added comments are sent.
+    ///
+    /// ```
+    /// use kibana_rs::exceptions::ExceptionItem;
+    /// use serde_json::{from_value, json, to_value};
+    ///
+    /// let item: ExceptionItem = from_value(json!({
+    ///     "id": "item-a", "item_id": "scanner", "list_id": "allowlist",
+    ///     "name": "Scanner", "description": "Known host", "namespace_type": "single",
+    ///     "_version": "opaque-token", "entries": [], "tags": ["reviewed"],
+    ///     "comments": [{"id": "comment-a", "comment": "Already reviewed"}]
+    /// }))?;
+    /// let body = to_value(item.edit().name("Approved scanner").add_comment("Checked again"))?;
+    /// assert_eq!(body["_version"], "opaque-token");
+    /// assert_eq!(body["tags"], json!(["reviewed"]));
+    /// assert_eq!(body["comments"], json!([{"comment": "Checked again"}]));
+    /// # Ok::<(), serde_json::Error>(())
+    /// ```
     pub fn edit(&self) -> ItemEdit {
         ItemEdit {
             id: self.id.clone(),

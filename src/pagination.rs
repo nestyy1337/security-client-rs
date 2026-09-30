@@ -12,6 +12,10 @@
 //! Kibana pages by offset, so concurrent changes can skip or repeat items, and
 //! most collections refuse to page past 10,000 results. These checks do not
 //! give a consistent snapshot.
+//!
+//! Streams fetch pages as they are polled. Dropping a stream stops further
+//! requests. Starting a stream overrides a builder's selected page, but keeps
+//! its filters and page size.
 use futures_util::{
     StreamExt, TryStreamExt,
     future::BoxFuture,
