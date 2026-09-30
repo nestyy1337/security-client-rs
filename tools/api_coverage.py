@@ -20,7 +20,7 @@ VERBS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 NON_ENDPOINTS = {
     "client.cases", "client.default_space", "client.exceptions", "client.fleet", "client.request",
     "client.roles", "client.security", "client.space", "client.space_id", "client.spaces", "client.transport",
-    "exceptions.reference", "fleet.is_finished",
+    "exceptions.edit", "exceptions.reference", "fleet.as_str", "fleet.edit", "fleet.is_finished",
     "fleet.wait_for_action", "fleet.wait_for_agent_policy", "fleet.wait_for_upload",
 }
 # Helpers that send requests through named builders. A test calling the helper exercises them.
@@ -29,8 +29,8 @@ HELPER_CALLS = {
     "fleet.wait_for_agent_policy": {"fleet.get_agent"},
     "fleet.wait_for_upload": {"fleet.list_agent_uploads"},
 }
-# Modules without endpoints.
-NON_ENDPOINT_MODULES = {"error.rs", "lib.rs", "pagination.rs", "poll.rs", "request.rs"}
+# Modules without endpoints. A directory module such as `fleet/` is one namespace.
+NON_ENDPOINT_MODULES = {"error", "http", "lib", "pagination", "poll", "request"}
 # Live suites need a deployment; wire tests must run offline in every CI job.
 LIVE_TESTS = {"live.rs", "deployment.rs"}
 
@@ -69,13 +69,14 @@ def wrappers(root):
     """
     result = {}
     pattern = r"\.request\(\s*Method::(\w+),\s*Scope::(\w+),\s*&\[([^\]]+)\]"
-    for source in sorted((root / "src").glob("*.rs")):
-        if source.name in NON_ENDPOINT_MODULES:
+    for source in sorted((root / "src").rglob("*.rs")):
+        namespace = source.relative_to(root / "src").parts[0].removesuffix(".rs")
+        if namespace in NON_ENDPOINT_MODULES:
             continue
         code = source.read_text()
         functions = list(re.finditer(r"pub (?:async )?fn (\w+)\b[^(]*\(\s*&self", code))
         for function in functions:
-            name = f"{source.stem}.{function[1]}"
+            name = f"{namespace}.{function[1]}"
             if name in NON_ENDPOINTS:
                 continue
             following = re.compile(r"\bfn\s+\w+").search(code, function.end())

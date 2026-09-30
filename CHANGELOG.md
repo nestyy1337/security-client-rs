@@ -2,6 +2,27 @@
 
 This project follows [Semantic Versioning](https://semver.org/). Until 1.0, minor versions may contain breaking changes; they are listed under **Changed**.
 
+## Unreleased
+
+### Added
+
+- Resource-derived exception and package-policy edits, with namespace-carrying exception targets and append-only comments.
+- Forward-compatible Fleet action and upload statuses, and `WaitOutcome::Vanished` for resources that disappear after being seen.
+- `RuleSchedule` and checked patch fields, with `unchecked_field` for deliberate overrides.
+- Bounded pagination with distinct errors for an unexpected page and an exhausted page limit.
+- Response status and headers on body-read, response-limit and decode errors, and separate tracing events for headers and buffered body reads.
+
+### Changed
+
+- Exception updates accept edits from retrieved resources. Package-policy updates accept full edits or explicit simplified replacements.
+
+### Fixed
+
+- Full package-policy edits remove response-only compiled inputs. Simplified responses must be fetched in full before editing, and safe edits require concurrency tokens.
+- JSON duplicate-key validation preserves encoded numbers and rejects unsupported integers during field composition.
+- Rejected paths omit query and fragment values from tracing, and cloned construction errors keep their category.
+- Checked rule patches protect paired schedule fields. Retry deadlines bound requests and backoff.
+
 ## 0.1.0 - 2026-09-29
 
 Initial release.

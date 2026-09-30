@@ -5,6 +5,8 @@ use std::time::Duration;
 use common::Mock;
 use futures_util::TryStreamExt;
 use kibana_rs::{
+    Error,
+    fleet::{ActionStatus, UploadStatus},
     pagination::Page,
     poll::{PollOptions, WaitOutcome},
 };
@@ -116,7 +118,10 @@ async fn waiting_for_an_action_returns_its_final_state_or_the_last_seen_state() 
     let WaitOutcome::Finished(done) = outcome else {
         panic!("expected a finished action")
     };
-    assert_eq!((done.status.as_str(), done.nb_agents_failed), ("FAILED", 1));
+    assert_eq!(
+        (done.status, done.nb_agents_failed),
+        (ActionStatus::Failed, 1)
+    );
     mock.take().route(
         "GET",
         "/api/fleet/agents/action_status",
@@ -128,11 +133,12 @@ async fn waiting_for_an_action_returns_its_final_state_or_the_last_seen_state() 
     }
     let options = PollOptions::new(Duration::from_millis(60)).interval(Duration::from_millis(10));
     match fleet.fleet().wait_for_action("act", options).await.unwrap() {
-        WaitOutcome::TimedOut { last: Some(last) } => assert_eq!(last.status, "IN_PROGRESS"),
+        WaitOutcome::TimedOut { last: Some(last) } => {
+            assert_eq!(last.status, ActionStatus::InProgress)
+        }
         other => panic!("expected a timeout with the last state, got {other:?}"),
     }
     let empty = Mock::start().await;
-    empty.json(json!({"items": []}));
     let outcome = empty
         .client()
         .fleet()
@@ -144,6 +150,164 @@ async fn waiting_for_an_action_returns_its_final_state_or_the_last_seen_state() 
         "{outcome:?}"
     );
     assert!(outcome.finished().is_none());
+    assert_eq!(empty.request_count(), 0, "a zero timeout sends nothing");
+}
+
+fn action(id: &str, status: &str) -> Value {
+    json!({"actionId": id, "type": "UPGRADE", "status": status, "nbAgentsActionCreated": 2,
+           "nbAgentsAck": 1, "nbAgentsFailed": 1, "nbAgentsActioned": 2})
+}
+
+/// A full page of 100 unrelated actions.
+fn busy_page() -> Value {
+    let items: Vec<Value> = (0..100)
+        .map(|i| action(&format!("other-{i}"), "COMPLETE"))
+        .collect();
+    json!({ "items": items })
+}
+
+#[tokio::test]
+async fn waiting_for_an_action_searches_larger_windows_and_reports_eviction() {
+    let mock = Mock::start().await;
+    let fleet = mock.client();
+    mock.json(busy_page());
+    mock.json(json!({"items": [action("act", "IN_PROGRESS")]}));
+    mock.json(busy_page());
+    mock.json(json!({"items": [action("act", "COMPLETE")]}));
+    let done = fleet
+        .fleet()
+        .wait_for_action("act", fast())
+        .await
+        .unwrap()
+        .finished()
+        .unwrap();
+    assert_eq!(done.status, ActionStatus::Complete);
+    for size in ["100", "1000", "100", "1000"] {
+        mock.take().route(
+            "GET",
+            "/api/fleet/agents/action_status",
+            &[("page", "0"), ("perPage", size)],
+        );
+    }
+
+    mock.json(json!({"items": [action("act", "IN_PROGRESS")]}));
+    for _ in 0..3 {
+        mock.json(json!({"items": [action("other", "COMPLETE")]}));
+    }
+    match fleet.fleet().wait_for_action("act", fast()).await.unwrap() {
+        WaitOutcome::Vanished { last } => {
+            assert_eq!(
+                (last.status, last.nb_agents_failed),
+                (ActionStatus::InProgress, 1)
+            )
+        }
+        other => panic!("expected the action to vanish, got {other:?}"),
+    }
+
+    while mock.request_count() > 0 {
+        mock.take();
+    }
+    for _ in 0..3 {
+        mock.json(busy_page());
+    }
+    let error = fleet
+        .fleet()
+        .wait_for_action("act", fast())
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.status().map(|s| s.as_u16()),
+        Some(599),
+        "the second check finds no queued reply"
+    );
+    let sizes: Vec<_> = (0..4)
+        .map(|_| mock.take().query_pairs()[1].1.clone())
+        .collect();
+    assert_eq!(
+        sizes,
+        ["100", "1000", "10000", "100"],
+        "one check searches all three history windows"
+    );
+}
+
+#[tokio::test]
+async fn unknown_action_and_upload_states_end_the_wait_for_inspection() {
+    let mock = Mock::start().await;
+    let fleet = mock.client();
+    mock.json(json!({"items": [action("act", "PAUSED_FOR_REVIEW")]}));
+    let action = fleet
+        .fleet()
+        .wait_for_action("act", fast())
+        .await
+        .unwrap()
+        .finished()
+        .unwrap();
+    assert_eq!(
+        action.status,
+        ActionStatus::Unknown("PAUSED_FOR_REVIEW".into())
+    );
+    assert_eq!(action.status.as_str(), "PAUSED_FOR_REVIEW");
+
+    for (status, finished) in [
+        ("IN_PROGRESS", false),
+        ("COMPLETE", true),
+        ("FAILED", true),
+        ("CANCELLED", true),
+        ("EXPIRED", true),
+        ("ROLLOUT_PASSED", true),
+    ] {
+        let parsed = ActionStatus::from(status.to_owned());
+        assert!(!matches!(parsed, ActionStatus::Unknown(_)), "{status}");
+        assert_eq!((parsed.as_str(), parsed.is_finished()), (status, finished));
+    }
+    for (status, finished) in [
+        ("AWAITING_UPLOAD", false),
+        ("IN_PROGRESS", false),
+        ("READY", true),
+        ("FAILED", true),
+        ("EXPIRED", true),
+        ("DELETED", true),
+    ] {
+        let parsed = UploadStatus::from(status.to_owned());
+        assert!(!matches!(parsed, UploadStatus::Unknown(_)), "{status}");
+        assert_eq!((parsed.as_str(), parsed.is_finished()), (status, finished));
+    }
+}
+
+#[tokio::test]
+async fn policy_acknowledgment_needs_a_reported_numeric_revision() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    for _ in 0..100 {
+        mock.json(json!({"item": {"id": "agent", "policy_id": "p", "status": "online"}}));
+    }
+    let outcome = client
+        .fleet()
+        .wait_for_agent_policy(
+            "agent",
+            "p",
+            1,
+            PollOptions::new(Duration::from_millis(50)).interval(Duration::from_millis(5)),
+        )
+        .await
+        .unwrap();
+    match outcome {
+        WaitOutcome::TimedOut { last: Some(agent) } => assert_eq!(agent.policy_revision, None),
+        other => panic!("an absent revision is not acknowledged: {other:?}"),
+    }
+
+    let malformed = Mock::start().await;
+    malformed.json(json!({"item": {"id": "agent", "policy_id": "p", "status": "online", "policy_revision": "2"}}));
+    let error = malformed
+        .client()
+        .fleet()
+        .wait_for_agent_policy("agent", "p", 1, fast())
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, Error::Decode { .. }),
+        "a malformed revision fails immediately instead of timing out: {error:?}"
+    );
 }
 
 #[tokio::test]
@@ -164,7 +328,7 @@ async fn waiting_for_uploads_and_policy_acknowledgment() {
         .unwrap()
         .finished()
         .unwrap();
-    assert_eq!(upload.status, "READY");
+    assert_eq!(upload.status, UploadStatus::Ready);
     mock.take()
         .route("GET", "/s/soc/api/fleet/agents/agent/uploads", &[]);
 
@@ -342,4 +506,75 @@ async fn every_page_shape_streams_its_items() {
         0,
         "a complete first page ends the stream"
     );
+}
+
+#[tokio::test]
+async fn pages_must_match_the_request_and_bounded_streams_report_stopping() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    mock.json(json!({"data": [rule(0)], "page": 1, "perPage": 1, "total": 3}));
+    mock.json(json!({"data": [rule(0)], "page": 1, "perPage": 1, "total": 3}));
+    let error = client
+        .security()
+        .find_rules()
+        .per_page(1)
+        .items()
+        .try_collect::<Vec<_>>()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(
+            error,
+            Error::UnexpectedPage {
+                requested: 2,
+                returned: 1
+            }
+        ),
+        "{error:?}"
+    );
+
+    for page in 1..=2 {
+        mock.json(json!({"data": [rule(page)], "page": page, "perPage": 1, "total": 3}));
+    }
+    let mut seen = Vec::new();
+    let mut stream = client.security().find_rules().per_page(1).bounded_items(2);
+    let error = loop {
+        match futures_util::TryStreamExt::try_next(&mut stream).await {
+            Ok(Some(rule)) => seen.push(rule.id),
+            Ok(None) => panic!("a stopped traversal must not look complete"),
+            Err(error) => break error,
+        }
+    };
+    assert_eq!(seen, ["r1", "r2"]);
+    assert!(
+        matches!(error, Error::PageLimit { max_pages: 2 }),
+        "{error:?}"
+    );
+
+    while mock.request_count() > 0 {
+        mock.take();
+    }
+    mock.json(json!({"data": [rule(1)], "page": 1, "perPage": 1, "total": 1}));
+    let complete: Vec<_> = client
+        .security()
+        .find_rules()
+        .per_page(1)
+        .bounded_pages(1)
+        .try_collect()
+        .await
+        .unwrap();
+    assert_eq!(
+        complete.len(),
+        1,
+        "reaching the total within the bound is complete"
+    );
+    let error = client
+        .security()
+        .find_rules()
+        .per_page(0)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(error, Error::InvalidRequest(_)), "{error:?}");
+    assert_eq!(mock.request_count(), 1);
 }

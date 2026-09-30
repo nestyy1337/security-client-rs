@@ -2,10 +2,11 @@ mod common;
 
 use common::Mock;
 use kibana_rs::{
-    SortOrder,
+    Error, SortOrder,
     exceptions::{
-        Comment, Entry, ExceptionList, ItemSelector, ListReference, ListSelector, NamespaceType,
-        NestedEntry, NewItem, NewList, Operator, OsType, ValueListReference,
+        Comment, Entry, ExceptionItem, ExceptionList, ItemSelector, ItemTarget, ListReference,
+        ListSelector, ListTarget, NamespaceType, NestedEntry, NewItem, NewList, Operator, OsType,
+        ValueListReference,
     },
 };
 use serde_json::{Map, Value, json};
@@ -20,6 +21,42 @@ fn item_json(id: &str) -> Value {
     json!({"id": id, "item_id": "scanner-1", "list_id": "scanners", "name": "Scanner",
            "description": "", "namespace_type": "single", "_version": "WzIsMV0=",
            "entries": [{"type": "future_type", "field": "x"}], "type": "simple"})
+}
+
+#[tokio::test]
+async fn exception_edits_require_a_nonempty_concurrency_token() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    for revision in [Value::Null, json!("")] {
+        let mut list = list_json("list");
+        list["_version"] = revision.clone();
+        let list: ExceptionList = serde_json::from_value(list).unwrap();
+        let error = client
+            .exceptions()
+            .update_list(&list.edit())
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidRequest(message) if message.contains("_version")),
+            "{error:?}"
+        );
+
+        let mut item = item_json("item");
+        item["_version"] = revision;
+        let item: ExceptionItem = serde_json::from_value(item).unwrap();
+        let error = client
+            .exceptions()
+            .update_item(&item.edit())
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidRequest(message) if message.contains("_version")),
+            "{error:?}"
+        );
+    }
+    assert_eq!(mock.request_count(), 0);
 }
 
 #[test]
@@ -150,16 +187,16 @@ async fn lists_are_created_read_replaced_deleted_and_paged() {
     mock.json(list_json("so-1"));
     client
         .exceptions()
-        .update_list("so-1", "WzEsMV0=", &definition)
+        .update_list(&list.edit().name("Renamed").version(3))
         .send()
         .await
         .unwrap();
-    let mut replaced = expected.clone();
-    replaced["id"] = json!("so-1");
-    replaced["_version"] = json!("WzEsMV0=");
     mock.take()
         .route("PUT", "/s/soc/api/exception_lists", &[])
-        .body(replaced);
+        .body(json!({
+            "id": "so-1", "_version": "WzEsMV0=", "namespace_type": "single", "type": "detection",
+            "name": "Renamed", "description": "d", "tags": [], "os_types": [], "version": 3
+        }));
 
     mock.json(list_json("so-1"));
     client
@@ -221,10 +258,7 @@ async fn items_are_created_read_replaced_deleted_searched_and_summarized() {
     .item_id("scanner-1")
     .tags(["network"])
     .os_types(vec![OsType::Macos])
-    .comments(vec![
-        Comment::new("Approved by SOC"),
-        Comment::new("kept").id("c-1"),
-    ])
+    .comments(vec![Comment::new("Approved by SOC")])
     .expire_time("2030-01-01T00:00:00Z")
     .meta(Map::new());
     let expected = json!({
@@ -232,7 +266,7 @@ async fn items_are_created_read_replaced_deleted_searched_and_summarized() {
         "type": "simple", "namespace_type": "single",
         "entries": [{"type": "match", "field": "host.name", "operator": "included", "value": "scanner-1"}],
         "tags": ["network"], "os_types": ["macos"],
-        "comments": [{"comment": "Approved by SOC"}, {"comment": "kept", "id": "c-1"}],
+        "comments": [{"comment": "Approved by SOC"}],
         "expire_time": "2030-01-01T00:00:00Z", "meta": {}
     });
 
@@ -268,16 +302,17 @@ async fn items_are_created_read_replaced_deleted_searched_and_summarized() {
     mock.json(item_json("item-1"));
     client
         .exceptions()
-        .update_item("item-1", "WzIsMV0=", &definition)
+        .update_item(&item.edit())
         .send()
         .await
         .unwrap();
-    let mut replaced = expected;
-    replaced["id"] = json!("item-1");
-    replaced["_version"] = json!("WzIsMV0=");
     mock.take()
         .route("PUT", "/s/soc/api/exception_lists/items", &[])
-        .body(replaced);
+        .body(json!({
+            "id": "item-1", "_version": "WzIsMV0=", "namespace_type": "single", "type": "simple",
+            "name": "Scanner", "description": "", "entries": [{"type": "future_type", "field": "x"}],
+            "tags": [], "os_types": [], "comments": []
+        }));
 
     mock.json(item_json("item-1"));
     client
@@ -428,4 +463,200 @@ async fn duplication_export_and_import_encode_required_selectors() {
         request.multipart_file("exceptions.ndjson", "application/ndjson"),
         "{\"list_id\":\"exported\"}\n"
     );
+}
+
+fn populated_item() -> ExceptionItem {
+    serde_json::from_value(json!({
+        "id": "item-1", "item_id": "scanner-1", "list_id": "scanners", "name": "Scanner",
+        "description": "Known scanner", "namespace_type": "agnostic", "_version": "WzUsMV0=",
+        "type": "simple", "tags": ["network"], "os_types": ["windows"],
+        "entries": [{"type": "future_type", "field": "x"},
+                    {"type": "match", "field": "host.name", "operator": "included", "value": "scanner-1"}],
+        "comments": [{"id": "c-1", "comment": "Approved by SOC", "created_at": "2026-09-01T00:00:00Z",
+                      "created_by": "analyst"}],
+        "expire_time": "2030-01-01T00:00:00.000Z", "meta": {"ticket": "SOC-1"},
+        "created_at": "2026-09-01T00:00:00Z", "tie_breaker_id": "t"
+    }))
+    .unwrap()
+}
+
+#[tokio::test]
+async fn edits_keep_retrieved_state_and_send_only_new_comments() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let item = populated_item();
+    assert_eq!(item.comments[0].created_by.as_deref(), Some("analyst"));
+
+    mock.json(item_json("item-1"));
+    client
+        .exceptions()
+        .update_item(
+            &item
+                .edit()
+                .name("Renamed scanner")
+                .add_comment("Re-reviewed"),
+        )
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("PUT", "/s/soc/api/exception_lists/items", &[])
+        .body(json!({
+            "id": "item-1", "_version": "WzUsMV0=", "namespace_type": "agnostic", "type": "simple",
+            "name": "Renamed scanner", "description": "Known scanner", "tags": ["network"],
+            "os_types": ["windows"],
+            "entries": [{"type": "future_type", "field": "x"},
+                        {"type": "match", "field": "host.name", "operator": "included", "value": "scanner-1"}],
+            "comments": [{"comment": "Re-reviewed"}],
+            "expire_time": "2030-01-01T00:00:00.000Z", "meta": {"ticket": "SOC-1"}
+        }));
+
+    let replaced = item
+        .edit()
+        .description("")
+        .tags(Vec::<String>::new())
+        .os_types(vec![])
+        .entries(vec![Entry::Exists {
+            field: "user.name".into(),
+            operator: Operator::Included,
+        }])
+        .expire_time("2031-01-01T00:00:00Z")
+        .meta(Map::new());
+    mock.json(item_json("item-1"));
+    client
+        .exceptions()
+        .update_item(&replaced)
+        .send()
+        .await
+        .unwrap();
+    let body = mock.take().json();
+    assert_eq!(
+        body["entries"],
+        json!([{"type": "exists", "field": "user.name", "operator": "included"}])
+    );
+    assert_eq!(
+        (body["tags"].clone(), body["os_types"].clone()),
+        (json!([]), json!([]))
+    );
+    assert_eq!(
+        body["comments"],
+        json!([]),
+        "existing comments are never resent"
+    );
+    assert_eq!(body["expire_time"], "2031-01-01T00:00:00Z");
+
+    let list: ExceptionList = serde_json::from_value(json!({
+        "id": "so-1", "list_id": "scanners", "name": "Scanners", "description": "d",
+        "namespace_type": "agnostic", "type": "endpoint", "_version": "WzEsMV0=",
+        "tags": ["network"], "os_types": ["linux"], "meta": {"owner": "soc"}, "version": 4
+    }))
+    .unwrap();
+    mock.json(list_json("so-1"));
+    client
+        .exceptions()
+        .update_list(&list.edit().description("Updated"))
+        .send()
+        .await
+        .unwrap();
+    mock.take().body(json!({
+        "id": "so-1", "_version": "WzEsMV0=", "namespace_type": "agnostic", "type": "endpoint",
+        "name": "Scanners", "description": "Updated", "tags": ["network"], "os_types": ["linux"],
+        "meta": {"owner": "soc"}
+    }));
+}
+
+#[tokio::test]
+async fn retrieved_resources_select_their_own_namespace() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let item = populated_item();
+    let list: ExceptionList = serde_json::from_value(json!({
+        "id": "so-1", "list_id": "scanners", "name": "Scanners", "description": "d",
+        "namespace_type": "agnostic", "type": "detection"
+    }))
+    .unwrap();
+
+    mock.json(item_json("item-1"));
+    client.exceptions().get_item(&item).send().await.unwrap();
+    mock.take().route(
+        "GET",
+        "/s/soc/api/exception_lists/items",
+        &[("id", "item-1"), ("namespace_type", "agnostic")],
+    );
+    mock.json(item_json("item-1"));
+    client
+        .exceptions()
+        .delete_item(ItemTarget::new(
+            ItemSelector::ItemId("scanner-1"),
+            NamespaceType::Agnostic,
+        ))
+        .send()
+        .await
+        .unwrap();
+    mock.take().route(
+        "DELETE",
+        "/s/soc/api/exception_lists/items",
+        &[("item_id", "scanner-1"), ("namespace_type", "agnostic")],
+    );
+
+    mock.json(list_json("so-1"));
+    client.exceptions().delete_list(&list).send().await.unwrap();
+    mock.take().route(
+        "DELETE",
+        "/s/soc/api/exception_lists",
+        &[("id", "so-1"), ("namespace_type", "agnostic")],
+    );
+    mock.json(json!({"total": 0}));
+    client
+        .exceptions()
+        .summary(&list.reference())
+        .send()
+        .await
+        .unwrap();
+    mock.take().route(
+        "GET",
+        "/s/soc/api/exception_lists/summary",
+        &[("id", "so-1"), ("namespace_type", "agnostic")],
+    );
+    mock.json(json!({"total": 0}));
+    client
+        .exceptions()
+        .get_list(ListTarget::new(
+            ListSelector::ListId("scanners"),
+            NamespaceType::Single,
+        ))
+        .send()
+        .await
+        .unwrap();
+    mock.take().route(
+        "GET",
+        "/s/soc/api/exception_lists",
+        &[("list_id", "scanners"), ("namespace_type", "single")],
+    );
+    mock.json(json!({"data": [], "page": 1, "per_page": 20, "total": 0}));
+    client.exceptions().find_items(&list).send().await.unwrap();
+    mock.take().route(
+        "GET",
+        "/s/soc/api/exception_lists/items/_find",
+        &[("list_id", "scanners"), ("namespace_type", "agnostic")],
+    );
+
+    for error in [
+        client
+            .exceptions()
+            .get_list(ListSelector::Id(""))
+            .send()
+            .await
+            .unwrap_err(),
+        client
+            .exceptions()
+            .delete_item(ItemSelector::ItemId(""))
+            .send()
+            .await
+            .unwrap_err(),
+        client.exceptions().find_items("").send().await.unwrap_err(),
+    ] {
+        assert!(matches!(error, Error::InvalidRequest(_)), "{error:?}");
+    }
+    assert_eq!(mock.request_count(), 0);
 }

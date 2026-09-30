@@ -69,6 +69,15 @@ impl GetAgent<'_> {
         with self.assertRaisesRegex(ValueError, "Review route extraction for fleet.new_method"):
             wrappers(self.root)
 
+    def test_directory_modules_form_one_namespace_and_http_is_ignored(self):
+        (self.root / "src/fleet.rs").rename(self.root / "src/fleet_agents.rs")
+        (self.root / "src/fleet").mkdir()
+        (self.root / "src/fleet_agents.rs").rename(self.root / "src/fleet/agents.rs")
+        (self.root / "src/http").mkdir()
+        (self.root / "src/http/response.rs").write_text("pub fn status_code(&self) -> u16 { 200 }")
+        self.assertEqual(wrappers(self.root), {"fleet.agent": ("GET", "/api/fleet/agents/{}", "Space")})
+        validate(self.root, inventory(self.spec), self.rows)
+
     def test_wrappers_need_an_offline_wire_test(self):
         (self.root / "tests/fleet.rs").write_text("// no calls")
         (self.root / "tests/live.rs").write_text("client.fleet().agent(id)")

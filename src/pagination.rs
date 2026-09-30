@@ -2,9 +2,16 @@
 //!
 //! Every `find_*` builder with pages has `pages()` and `items()`. They send one
 //! request per page, starting from the first, and stop after an empty page or
-//! once `total` items have been seen. Kibana pages by offset, so concurrent
-//! changes can skip or repeat items, and most collections refuse to page past
-//! 10,000 results.
+//! once `total` items have been seen. A page whose number differs from the one
+//! requested fails with [`Error::UnexpectedPage`].
+//!
+//! `bounded_pages(n)` and `bounded_items(n)` read at most `n` pages. If more
+//! remain, the stream ends with [`Error::PageLimit`],
+//! so a stopped traversal is never mistaken for a complete one.
+//!
+//! Kibana pages by offset, so concurrent changes can skip or repeat items, and
+//! most collections refuse to page past 10,000 results. These checks do not
+//! give a consistent snapshot.
 use futures_util::{
     StreamExt, TryStreamExt,
     future::BoxFuture,
@@ -13,7 +20,7 @@ use futures_util::{
 use serde_json::Value;
 
 use crate::{
-    Result,
+    Error, Result,
     cases::{Case, CasePage, CommentPage},
     exceptions::ExceptionPage,
     fleet::FleetPage,
@@ -28,6 +35,11 @@ pub trait Page {
     fn total(&self) -> u64;
     fn items(&self) -> &[Self::Item];
     fn into_items(self) -> Vec<Self::Item>;
+
+    /// The page number Kibana reports, if the page carries one.
+    fn number(&self) -> Option<u32> {
+        None
+    }
 }
 
 impl Page for RulePage {
@@ -35,6 +47,9 @@ impl Page for RulePage {
 
     fn total(&self) -> u64 {
         self.total
+    }
+    fn number(&self) -> Option<u32> {
+        Some(self.page)
     }
     fn items(&self) -> &[DetectionRule] {
         &self.data
@@ -50,6 +65,9 @@ impl Page for CasePage {
     fn total(&self) -> u64 {
         self.total
     }
+    fn number(&self) -> Option<u32> {
+        Some(self.page)
+    }
     fn items(&self) -> &[Case] {
         &self.cases
     }
@@ -63,6 +81,9 @@ impl Page for CommentPage {
 
     fn total(&self) -> u64 {
         self.total
+    }
+    fn number(&self) -> Option<u32> {
+        Some(self.page)
     }
     fn items(&self) -> &[Value] {
         &self.comments
@@ -78,6 +99,9 @@ impl<T> Page for ExceptionPage<T> {
     fn total(&self) -> u64 {
         self.total
     }
+    fn number(&self) -> Option<u32> {
+        Some(self.page)
+    }
     fn items(&self) -> &[T] {
         &self.data
     }
@@ -91,6 +115,9 @@ impl<T> Page for FleetPage<T> {
 
     fn total(&self) -> u64 {
         self.total
+    }
+    fn number(&self) -> Option<u32> {
+        Some(self.page)
     }
     fn items(&self) -> &[T] {
         &self.items
@@ -110,29 +137,82 @@ pub(crate) trait Paged<'a>: Clone + Send + 'a {
     fn fetch(self) -> BoxFuture<'a, Result<Self::Page>>;
 }
 
-/// The next page, if any: `(builder, page number, items seen so far)`.
-type Cursor<B> = Option<(B, u32, u64)>;
-
-pub(crate) fn pages<'a, B: Paged<'a>>(builder: B) -> BoxStream<'a, Result<B::Page>> {
-    stream::try_unfold(Some((builder, 1, 0)), next_page::<B>).boxed()
+/// Where a traversal stands.
+enum Cursor<B> {
+    /// Fetch `page` next, having seen `seen` items.
+    Next {
+        builder: B,
+        page: u32,
+        seen: u64,
+    },
+    /// More pages remain, but the page limit was reached.
+    Limited,
+    Done,
 }
 
-async fn next_page<'a, B: Paged<'a>>(cursor: Cursor<B>) -> Result<Option<(B::Page, Cursor<B>)>> {
-    let Some((builder, page, seen)) = cursor else {
-        return Ok(None);
+/// Streams pages from the first; `max_pages` bounds how many are read.
+pub(crate) fn pages<'a, B: Paged<'a>>(
+    builder: B,
+    max_pages: Option<u32>,
+) -> BoxStream<'a, Result<B::Page>> {
+    let start = match max_pages {
+        Some(0) => Cursor::Limited,
+        _ => Cursor::Next {
+            builder,
+            page: 1,
+            seen: 0,
+        },
+    };
+    stream::try_unfold(start, move |cursor| next_page(cursor, max_pages)).boxed()
+}
+
+async fn next_page<'a, B: Paged<'a>>(
+    cursor: Cursor<B>,
+    max_pages: Option<u32>,
+) -> Result<Option<(B::Page, Cursor<B>)>> {
+    let (builder, page, seen) = match cursor {
+        Cursor::Next {
+            builder,
+            page,
+            seen,
+        } => (builder, page, seen),
+        Cursor::Limited => {
+            return Err(Error::PageLimit {
+                max_pages: max_pages.unwrap_or_default(),
+            });
+        }
+        Cursor::Done => return Ok(None),
     };
     let result = builder.clone().with_page(page).fetch().await?;
+    if let Some(returned) = result.number().filter(|&returned| returned != page) {
+        return Err(Error::UnexpectedPage {
+            requested: page,
+            returned,
+        });
+    }
     let count = result.items().len() as u64;
-    let seen = seen + count;
-    let next = (count > 0 && seen < result.total()).then_some((builder, page + 1, seen));
+    let seen = seen.saturating_add(count);
+    let next = match page.checked_add(1) {
+        _ if count == 0 || seen >= result.total() => Cursor::Done,
+        _ if max_pages.is_some_and(|max| page >= max) => Cursor::Limited,
+        Some(page) => Cursor::Next {
+            builder,
+            page,
+            seen,
+        },
+        None => Cursor::Limited,
+    };
     Ok(Some((result, next)))
 }
 
-pub(crate) fn items<'a, B: Paged<'a>>(builder: B) -> BoxStream<'a, Result<<B::Page as Page>::Item>>
+pub(crate) fn items<'a, B: Paged<'a>>(
+    builder: B,
+    max_pages: Option<u32>,
+) -> BoxStream<'a, Result<<B::Page as Page>::Item>>
 where
     <B::Page as Page>::Item: Send + 'a,
 {
-    pages(builder)
+    pages(builder, max_pages)
         .map_ok(|page| stream::iter(page.into_items().into_iter().map(Ok)))
         .try_flatten()
         .boxed()
@@ -157,7 +237,7 @@ macro_rules! paginated {
             /// Streams every page from the first, one request per page.
             /// Any page set on this builder is ignored.
             pub fn pages(self) -> ::futures_util::stream::BoxStream<'a, $crate::Result<$page>> {
-                $crate::pagination::pages(self)
+                $crate::pagination::pages(self, None)
             }
 
             /// Streams every item across all pages. See [`pages`](Self::pages).
@@ -167,7 +247,28 @@ macro_rules! paginated {
                 'a,
                 $crate::Result<<$page as $crate::pagination::Page>::Item>,
             > {
-                $crate::pagination::items(self)
+                $crate::pagination::items(self, None)
+            }
+
+            /// Like [`pages`](Self::pages), reading at most `max_pages` pages.
+            /// If more remain, the stream ends with [`Error::PageLimit`](crate::Error::PageLimit).
+            pub fn bounded_pages(
+                self,
+                max_pages: u32,
+            ) -> ::futures_util::stream::BoxStream<'a, $crate::Result<$page>> {
+                $crate::pagination::pages(self, Some(max_pages))
+            }
+
+            /// Like [`items`](Self::items), reading at most `max_pages` pages.
+            /// If more remain, the stream ends with [`Error::PageLimit`](crate::Error::PageLimit).
+            pub fn bounded_items(
+                self,
+                max_pages: u32,
+            ) -> ::futures_util::stream::BoxStream<
+                'a,
+                $crate::Result<<$page as $crate::pagination::Page>::Item>,
+            > {
+                $crate::pagination::items(self, Some(max_pages))
             }
         }
     )*};

@@ -101,6 +101,25 @@ async fn requests_are_traced_without_secrets() {
         .await;
     let _ = client.cases().get("..").send().await;
 
+    for path in [
+        "api/x?token=rejected-query-secret",
+        "api/x#rejected-fragment-secret",
+    ] {
+        let error = client
+            .transport()
+            .send::<()>(
+                kibana_rs::http::Method::GET,
+                path,
+                Default::default(),
+                None,
+                None,
+                None,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(error, kibana_rs::Error::InvalidRequest(_)));
+    }
+
     let output = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();
     let lines: Vec<&str> = output.lines().collect();
     let completed = lines
@@ -126,6 +145,12 @@ async fn requests_are_traced_without_secrets() {
         "{output}"
     );
     assert!(
+        lines.iter().any(|l| l.contains("Kibana response body read")
+            && l.contains("operation=\"GetCase\"")
+            && l.contains("bytes=8")),
+        "reading a body is traced separately from the headers: {output}"
+    );
+    assert!(
         lines
             .iter()
             .any(|l| l.contains("did not match the expected type")
@@ -140,6 +165,8 @@ async fn requests_are_traced_without_secrets() {
     );
     for secret in [
         "query-secret",
+        "rejected-query-secret",
+        "rejected-fragment-secret",
         "body-secret",
         "password-secret",
         "ZWxhc3RpYzpwYXNzd29yZC1zZWNyZXQ=",
