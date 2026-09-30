@@ -7,6 +7,7 @@ This project follows [Semantic Versioning](https://semver.org/). Until 1.0, mino
 ### Added
 
 - Resource-derived exception and package-policy edits, with namespace-carrying exception targets and append-only comments.
+- Agent-policy edits that retain the retrieved inactivity timeout, and explicit clearing of data output selections with JSON null.
 - Forward-compatible Fleet action and upload statuses, and `WaitOutcome::Vanished` for resources that disappear after being seen.
 - `RuleSchedule` and checked patch fields, with `unchecked_field` for deliberate overrides.
 - Bounded pagination with distinct errors for an unexpected page and an exhausted page limit.

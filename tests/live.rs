@@ -669,6 +669,8 @@ async fn security_cases_comments_and_version_conflicts() {
 #[tokio::test]
 #[ignore = "requires a dedicated live Kibana deployment and Elastic package registry access"]
 async fn fleet_policy_and_integration_lifecycle() {
+    use serde_json::{Value, json};
+
     let root = client();
     let (space_id, client) = space(&root).await;
     let result: Result<()> = async {
@@ -676,7 +678,9 @@ async fn fleet_policy_and_integration_lifecycle() {
         let setup = fleet.setup().send().await?.json().await?;
         assert_eq!(setup["isInitialized"], true);
         let request = NewAgentPolicy::new("Test SOC endpoints", "default")
-            .monitoring_enabled(Vec::<String>::new());
+            .description("Retain policy settings when renamed")
+            .inactivity_timeout(3600)
+            .monitoring_enabled(["logs"]);
         let policy = fleet
             .create_agent_policy(&request)
             .send()
@@ -684,27 +688,60 @@ async fn fleet_policy_and_integration_lifecycle() {
             .json()
             .await?
             .item;
-        assert_eq!(
-            fleet
-                .get_agent_policy(&policy.id)
-                .send()
-                .await?
-                .json()
-                .await?
-                .item
-                .name,
-            "Test SOC endpoints"
-        );
-        let renamed = NewAgentPolicy::new("Updated SOC endpoints", "default")
-            .monitoring_enabled(Vec::<String>::new());
+        let fetched = fleet
+            .get_agent_policy(&policy.id)
+            .send()
+            .await?
+            .json()
+            .await?
+            .item;
+        assert_eq!(fetched.name, "Test SOC endpoints");
+        let renamed = fetched.edit()?.name("Updated SOC endpoints");
         let updated = fleet
-            .update_agent_policy(&policy.id, &renamed)
+            .edit_agent_policy(&renamed)
             .send()
             .await?
             .json()
             .await?
             .item;
         assert_eq!(updated.name, "Updated SOC endpoints");
+        assert_eq!(updated.description, fetched.description);
+        assert_eq!(updated.extra["inactivity_timeout"], 3600);
+        assert_eq!(updated.extra["monitoring_enabled"], json!(["logs"]));
+        let outputs = fleet.list_outputs().send().await?.json().await?;
+        let default_output = outputs["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|output| output["is_default"] == true)
+            .unwrap()["id"]
+            .as_str()
+            .unwrap();
+        let select_output = updated.edit()?.data_output_id(default_output);
+        let rejected = fleet
+            .edit_agent_policy(&select_output)
+            .send()
+            .await
+            .unwrap_err();
+        assert_eq!(rejected.status().unwrap().as_u16(), 400);
+        assert!(
+            rejected
+                .message()
+                .is_some_and(|message| message.contains("platinum"))
+        );
+        let clear_output = updated.edit()?.clear_data_output_id();
+        fleet.edit_agent_policy(&clear_output).send().await?;
+        let cleared = fleet
+            .get_agent_policy(&policy.id)
+            .send()
+            .await?
+            .json()
+            .await?
+            .item;
+        assert_eq!(cleared.extra.get("data_output_id"), Some(&Value::Null));
+        assert_eq!(cleared.description, fetched.description);
+        assert_eq!(cleared.extra["inactivity_timeout"], 3600);
+        assert_eq!(cleared.extra["monitoring_enabled"], json!(["logs"]));
         assert!(
             fleet
                 .find_agent_policies()

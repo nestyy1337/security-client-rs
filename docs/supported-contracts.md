@@ -1,6 +1,6 @@
 # Supported workflow contracts
 
-Reviewed on 2026-09-29 against the traditional, self-managed Kibana
+Reviewed on 2026-09-30 against the traditional, self-managed Kibana
 [v9.5.4 OpenAPI bundle](https://github.com/elastic/kibana/blob/v9.5.4/oas_docs/output/kibana.yaml)
 and [v9.4.7 bundle](https://github.com/elastic/kibana/blob/v9.4.7/oas_docs/output/kibana.yaml),
 plus the tagged implementations linked below. Deployment fixtures use Basic
@@ -9,10 +9,10 @@ workflows, not certification of every field or endpoint. The generated
 [API inventory](api-coverage.md) measures a different thing: named routes and
 test references.
 
-The source review and test inspection do not establish a fresh passing deployment
-run. The ignored tests need the [deployment runner](../tests/deployment/README.md);
-ordinary `cargo test` does not execute them. A release needs passing reports for
-both configured profiles.
+Live validation on 2026-09-30 passed all ten scenarios in each Basic deployment
+profile, including cleanup. The ignored tests need the
+[deployment runner](../tests/deployment/README.md); ordinary `cargo test` does
+not execute them. A release needs fresh passing reports for both profiles.
 
 ## Query detection rules
 
@@ -73,6 +73,43 @@ return per-object failures in a successful HTTP response. See the
 The exception scenario also covers item pagination, duplication, shared-list
 visibility, import conflicts and rule association. It does not establish support
 for every Endpoint exception variant, case connector or custom-field configuration.
+
+## Fleet agent-policy edits
+
+`AgentPolicy::edit` binds the policy ID and retains the required name and
+namespace. It also retains `inactivity_timeout`: the update schema defaults an
+omitted timeout to two weeks, even for an existing policy. A missing or invalid
+retrieved timeout is rejected locally rather than replaced with a guess. Other
+optional settings are omitted until changed, and response metadata and unknown
+fields are never resubmitted. See the matching schemas in
+[9.5.4](https://github.com/elastic/kibana/blob/v9.5.4/x-pack/platform/plugins/shared/fleet/server/types/models/agent_policy.ts)
+and [9.4.7](https://github.com/elastic/kibana/blob/v9.4.7/x-pack/platform/plugins/shared/fleet/server/types/models/agent_policy.ts).
+
+`Fleet::edit_agent_policy` applies the edit. `data_output_id(id)` selects an
+output; `clear_data_output_id()` sends JSON null to restore Fleet's default.
+Omission retains the existing selection. Both methods also exist on
+`NewAgentPolicy`. An empty description clears its text, and an empty monitoring
+selection disables monitoring. The generic `update_agent_policy(id, body)`
+remains available, with the server's defaults applying to omitted fields.
+
+Fleet merges submitted attributes. Its agent-policy `revision` tracks agent
+configuration delivery and is not an optimistic concurrency token. A rename can
+therefore overwrite concurrent changes to the required fields it resubmits.
+See the [update implementation](https://github.com/elastic/kibana/blob/v9.5.4/x-pack/platform/plugins/shared/fleet/server/services/agent_policy.ts).
+
+`agent_policy_edits_bind_identity_and_only_send_requested_settings` and
+`agent_policy_outputs_can_be_omitted_selected_or_cleared` in
+[fleet.rs](../tests/fleet.rs) check request projection and omitted/string/null
+bodies. The serialization example for `clear_data_output_id` is a runnable
+doctest. `fleet_policy_and_integration_lifecycle` in [live.rs](../tests/live.rs)
+checks that a rename retains a custom timeout, description and monitoring
+selection, that Basic rejects a per-policy output selection, and that explicit
+null clearing is accepted and survives a read-back. Kibana requires Platinum to
+set a per-policy output. Supplementary checks on disposable 9.5.4 and 9.4.7 trial
+clusters selected an output, renamed the policy without losing its selection or
+settings, cleared the existing override and read back null. These checks ran on
+2026-09-30 separately from the Basic deployment suites; it covers this transition
+and does not establish broader paid-feature support.
 
 ## Fleet action lookup and policy acknowledgment
 
