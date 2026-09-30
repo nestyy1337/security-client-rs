@@ -160,9 +160,38 @@ does not cover 8.x, Cloud, Serverless, paid features or upgrading an existing st
 Version support should expand only when corresponding deployment profiles and
 successful workflow checks exist.
 
-Endpoint `into_request()` retains the route and configuration while allowing
-additional request fields or query options. `CasePatch::field` extends case
-updates while protecting `id` and `version`. Selected response models retain
-unmodeled fields in `extra`; this does not extend the supported server versions.
+Selected response models retain unmodeled fields in `extra`; this does not
+extend the supported server versions.
 Fleet's typed agent subset includes nullable policy revision, last check-in and
 tags, alongside the policy ID and status used by acknowledgment checks.
+
+## Request identity checks
+
+Checked rule patch fields reserve selectors, and `CasePatch::field` reserves
+`id` and `version`. Resource-derived edits retain their target IDs and available
+concurrency tokens. Serialization rejects duplicate object keys, including
+extension maps that repeat modeled identity fields.
+
+`Spaces::update(id, body)` requires a JSON object with a string `id` matching the
+path argument. The
+[Spaces update contract](https://github.com/elastic/kibana/blob/v9.5.4/oas_docs/output/kibana.yaml)
+requires that body ID. `Fleet::update_agent_policy(id, body)` also requires an
+object, but permits `id` to be omitted; if present, it must be a matching string.
+Both tagged Fleet schemas linked above allow an optional ID. These checks return
+`Error::InvalidRequest` before HTTP. Generic bodies still leave writable fields
+and server schema compatibility to the caller; use `edit_agent_policy` to bind
+the target of a retrieved policy's edit.
+
+The identity tests in [administration.rs](../tests/administration.rs),
+[fleet.rs](../tests/fleet.rs) and [requests.rs](../tests/requests.rs) check
+missing, malformed and conflicting IDs, unchanged valid bodies, and errors
+retained across clones and raw body replacements. The live workflows check
+matching Space IDs and both omitted and matching Fleet IDs on both versions.
+The `CasePatch::field` doctest exercises reserved IDs and versions.
+
+Endpoint `into_request()` retains the route and configuration. Subsequent raw
+`Request::json` or `Request::body` replacements do not reapply typed identity,
+concurrency or field checks, and `Request::query` appends without checking
+duplicate selectors. Earlier construction errors remain errors. Callers using
+these raw options or `unchecked_field` must preserve the required identity and
+tokens themselves.

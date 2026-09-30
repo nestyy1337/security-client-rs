@@ -71,6 +71,18 @@ async fn serialization_failures_are_reported_by_send_without_a_request() {
             .await
             .unwrap_err(),
         client
+            .spaces()
+            .update("soc", &unserializable())
+            .send()
+            .await
+            .unwrap_err(),
+        client
+            .fleet()
+            .update_agent_policy("p1", &unserializable())
+            .send()
+            .await
+            .unwrap_err(),
+        client
             .security()
             .patch_rule(RuleSelector::Id("r"))
             .field("threat", unserializable())
@@ -160,7 +172,81 @@ async fn extension_maps_cannot_override_modeled_identity() {
         "{error:?}"
     );
     assert!(matches!(Body::json(&space), Err(Error::InvalidRequest(_))));
+    let error = client
+        .spaces()
+        .update("intended-space", &space)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, Error::InvalidRequest(ref message) if message.contains("repeats")),
+        "{error:?}"
+    );
     assert_eq!(mock.request_count(), 0);
+}
+
+#[tokio::test]
+async fn identity_conflicts_survive_cloning_and_body_replacement() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let conflicting = json!({"id": "other", "name": "Other", "namespace": "default"});
+    let valid = json!({"id": "soc", "name": "SOC", "namespace": "default"});
+    for request in [
+        client.spaces().update("soc", &conflicting).into_request(),
+        client
+            .fleet()
+            .update_agent_policy("soc", &conflicting)
+            .into_request(),
+    ] {
+        for copy in [
+            request.clone(),
+            request.clone().json(&valid),
+            request.clone().body(Body::json(&valid).unwrap()),
+            request,
+        ] {
+            let error = copy.send().await.unwrap_err();
+            assert!(
+                matches!(error, Error::InvalidRequest(ref message)
+                    if message == "request body id must be a string matching the path id"),
+                "{error:?}"
+            );
+        }
+    }
+    assert_eq!(mock.request_count(), 0);
+}
+
+#[tokio::test]
+async fn raw_body_replacement_can_deliberately_change_identity() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let body = json!({"id": "other-rule", "enabled": false});
+    mock.json(json!({}));
+    client
+        .security()
+        .patch_rule(RuleSelector::Id("selected-rule"))
+        .enabled(true)
+        .into_request()
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("PATCH", "/s/soc/api/detection_engine/rules", &[])
+        .body(body);
+
+    let body = json!({"id": "other-space", "name": "Other"});
+    mock.json(json!({}));
+    client
+        .spaces()
+        .update("soc", &Space::new("soc", "SOC"))
+        .into_request()
+        .body(Body::json(&body).unwrap())
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("PUT", "/api/spaces/space/soc", &[])
+        .body(body);
 }
 
 #[tokio::test]

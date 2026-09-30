@@ -611,7 +611,7 @@
     "operation_id": "put-fleet-agent-policies-agentpolicyid",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Retrieved edits bind the policy ID, retain inactivity timeout and support null output clearing; other settings only as caller-supplied JSON. Selecting an output requires Platinum. No optimistic concurrency check."
+    "notes": "Retrieved edits bind the policy ID, retain inactivity timeout and support null output clearing; generic bodies reject a supplied ID that differs from the path. Other settings only as caller-supplied JSON. Selecting an output requires Platinum. No optimistic concurrency check."
   },
   {
     "wrapper": "fleet.update_package_policy",
@@ -831,6 +831,6 @@
     "operation_id": "put-spaces-space-id",
     "scope": "Global",
     "contract": "partial",
-    "notes": "Same fields as creation; extensible fields are sent back unchanged."
+    "notes": "Same fields as creation; the required body ID must match the path before HTTP. Extensible fields are sent back unchanged."
   }
 ]

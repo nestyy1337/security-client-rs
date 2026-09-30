@@ -400,7 +400,8 @@ impl<'a> Security<'a> {
     }
 
     /// Changes only the fields set on the returned builder. The selector is
-    /// sent in the body and cannot be changed by later setters.
+    /// sent in the body and protected by checked setters. Deliberate overrides
+    /// use [`PatchRule::unchecked_field`] or a replacement raw request body.
     pub fn patch_rule(&self, rule: RuleSelector<'_>) -> PatchRule<'a> {
         let (key, value) = rule.pair();
         PatchRule(

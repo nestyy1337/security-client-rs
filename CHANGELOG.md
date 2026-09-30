@@ -19,6 +19,7 @@ This project follows [Semantic Versioning](https://semver.org/). Until 1.0, mino
 
 ### Fixed
 
+- Space and generic agent-policy updates reject conflicting URL and body IDs before HTTP.
 - Full package-policy edits remove response-only compiled inputs. Simplified responses must be fetched in full before editing, and safe edits require concurrency tokens.
 - JSON duplicate-key validation preserves encoded numbers and rejects unsupported integers during field composition.
 - Rejected paths omit query and fragment values from tracing, and cloned construction errors keep their category.
