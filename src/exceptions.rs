@@ -774,11 +774,13 @@ impl<'a> Exceptions<'a> {
     }
 
     /// Replaces the editable fields of the list the edit was created from. A
-    /// list changed since it was read fails with HTTP 409.
+    /// list changed since it was read fails with HTTP 409. A missing or empty
+    /// concurrency token fails locally with [`crate::Error::InvalidRequest`].
     pub fn update_list(&self, list: &ListEdit) -> UpdateList<'a> {
         UpdateList(
             self.0
                 .request(Method::PUT, Scope::Space, &["api", "exception_lists"])
+                .nonempty("_version", list.revision.as_deref().unwrap_or_default())
                 .json(list),
         )
     }
@@ -824,6 +826,7 @@ impl<'a> Exceptions<'a> {
 
     /// Replaces the editable fields of the item the edit was created from and
     /// appends its new comments. An item changed since it was read fails with HTTP 409.
+    /// A missing or empty concurrency token fails locally with [`crate::Error::InvalidRequest`].
     pub fn update_item(&self, item: &ItemEdit) -> UpdateItem<'a> {
         UpdateItem(
             self.0
@@ -832,6 +835,7 @@ impl<'a> Exceptions<'a> {
                     Scope::Space,
                     &["api", "exception_lists", "items"],
                 )
+                .nonempty("_version", item.revision.as_deref().unwrap_or_default())
                 .json(item),
         )
     }

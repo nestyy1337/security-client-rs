@@ -3,10 +3,10 @@
 //! Every `find_*` builder with pages has `pages()` and `items()`. They send one
 //! request per page, starting from the first, and stop after an empty page or
 //! once `total` items have been seen. A page whose number differs from the one
-//! requested fails with [`Error::UnexpectedPage`](crate::Error::UnexpectedPage).
+//! requested fails with [`Error::UnexpectedPage`].
 //!
 //! `bounded_pages(n)` and `bounded_items(n)` read at most `n` pages. If more
-//! remain, the stream ends with [`Error::PageLimit`](crate::Error::PageLimit),
+//! remain, the stream ends with [`Error::PageLimit`],
 //! so a stopped traversal is never mistaken for a complete one.
 //!
 //! Kibana pages by offset, so concurrent changes can skip or repeat items, and

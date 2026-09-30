@@ -735,8 +735,14 @@ async fn fleet_policy_and_integration_lifecycle() {
             .json()
             .await?
             .item;
+        let renamed = format!("krs-system-edited-{space_id}");
         let edited = fleet
-            .update_package_policy(&current.edit().description("Edited integration test"))
+            .update_package_policy(
+                &current
+                    .edit()
+                    .name(&renamed)
+                    .description("Edited integration test"),
+            )
             .send()
             .await?
             .json()
@@ -746,6 +752,7 @@ async fn fleet_policy_and_integration_lifecycle() {
             edited.description.as_deref(),
             Some("Edited integration test")
         );
+        assert_eq!(edited.name, renamed);
         assert_eq!(
             edited.inputs.as_array().map(Vec::len),
             current.inputs.as_array().map(Vec::len),

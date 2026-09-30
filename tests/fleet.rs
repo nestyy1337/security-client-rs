@@ -2,7 +2,7 @@ mod common;
 
 use common::Mock;
 use kibana_rs::{
-    SortOrder,
+    Error, SortOrder,
     fleet::{
         AgentSelection, BulkActionResult, DiagnosticMetric, NewAgentPolicy, NewPackagePolicy,
         PackagePolicy, PackageRef, PolicyInput, PolicyStream,
@@ -722,16 +722,36 @@ async fn package_policies_use_the_simplified_format() {
                      "vars": {"paths": {"type": "text", "value": ["/var/log/syslog"]}}}]}]);
     let mut stored = package_policy("pp");
     stored["inputs"] = full_inputs.clone();
+    stored["inputs"][0]["compiled_input"] = json!({"generated": "response only"});
     stored["vars"] = json!({"api_key": {"type": "password", "value": "vars-secret"}});
     stored["version"] = json!("WzMsMV0=");
     stored["package"]["title"] = json!("System");
     stored["created_at"] = json!("2026-09-30T00:00:00Z");
-    let retrieved: PackagePolicy = serde_json::from_value(stored).unwrap();
+    mock.json(json!({"item": stored}));
+    let retrieved = client
+        .fleet()
+        .get_package_policy("pp")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+        .item;
+    mock.take()
+        .route("GET", "/s/soc/api/fleet/package_policies/pp", &[]);
     assert!(!format!("{retrieved:?}").contains("vars-secret"));
     let edit = retrieved
         .edit()
+        .name("renamed-system")
         .description("Edited")
         .policy_ids(["p1", "p3"]);
+    assert!(
+        serde_json::to_value(&edit).unwrap()["inputs"][0]
+            .get("compiled_input")
+            .is_none()
+    );
+    let edit = edit.inputs(retrieved.inputs.clone());
     assert!(!format!("{edit:?}").contains("vars-secret"));
     mock.json(json!({"item": package_policy("pp")}));
     client
@@ -743,12 +763,13 @@ async fn package_policies_use_the_simplified_format() {
     mock.take()
         .route("PUT", "/s/soc/api/fleet/package_policies/pp", &[])
         .body(json!({
-            "name": "system-1", "namespace": "default", "description": "Edited", "enabled": true,
+            "name": "renamed-system", "namespace": "default", "description": "Edited", "enabled": true,
             "package": {"name": "system", "version": "2.5.0", "title": "System"},
             "policy_ids": ["p1", "p3"], "inputs": full_inputs,
             "vars": {"api_key": {"type": "password", "value": "vars-secret"}},
             "version": "WzMsMV0="
         }));
+    assert!(retrieved.inputs[0].get("compiled_input").is_some());
     let debug = format!("{definition:?}");
     assert!(
         debug.contains("paths") && !debug.contains("/var/log/syslog"),
@@ -770,6 +791,79 @@ async fn package_policies_use_the_simplified_format() {
             &[("force", "true")],
         )
         .no_body();
+}
+
+#[tokio::test]
+async fn package_policy_edits_require_full_inputs_and_a_version() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let mut simplified = package_policy("pp");
+    simplified["inputs"] = json!({"system-logfile": {
+        "enabled": true,
+        "vars": {"preserve_original_event": false},
+        "streams": {"system.syslog": {"vars": {"paths": ["/var/log/syslog"]}}}
+    }});
+    simplified["vars"] = json!({"api_key": "vars-secret"});
+    simplified["version"] = json!("WzMsMV0=");
+    let definition =
+        NewPackagePolicy::new("system-1", "default", PackageRef::new("system", "2.5.0"));
+    for create in [true, false] {
+        mock.json(json!({"item": simplified}));
+        let response = if create {
+            client
+                .fleet()
+                .create_package_policy(&definition)
+                .send()
+                .await
+                .unwrap()
+        } else {
+            client
+                .fleet()
+                .update_package_policy(definition.replacing("pp"))
+                .send()
+                .await
+                .unwrap()
+        };
+        let policy = response.json().await.unwrap().item;
+        mock.take();
+        let error = client
+            .fleet()
+            .update_package_policy(&policy.edit().name("renamed"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidRequest(message) if message.contains("get_package_policy")),
+            "{error:?}"
+        );
+        let edit = policy.edit().inputs(json!([]));
+        let error = client
+            .fleet()
+            .update_package_policy(&edit)
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidRequest(message) if message.contains("get_package_policy")),
+            "{error:?}"
+        );
+    }
+    for version in [Value::Null, json!("")] {
+        let mut stored = package_policy("pp");
+        stored["version"] = version;
+        let policy: PackagePolicy = serde_json::from_value(stored).unwrap();
+        let error = client
+            .fleet()
+            .update_package_policy(&policy.edit())
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidRequest(message) if message.contains("version")),
+            "{error:?}"
+        );
+    }
+    assert_eq!(mock.request_count(), 0);
 }
 
 #[tokio::test]

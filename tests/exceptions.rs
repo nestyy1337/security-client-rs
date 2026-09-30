@@ -23,6 +23,42 @@ fn item_json(id: &str) -> Value {
            "entries": [{"type": "future_type", "field": "x"}], "type": "simple"})
 }
 
+#[tokio::test]
+async fn exception_edits_require_a_nonempty_concurrency_token() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    for revision in [Value::Null, json!("")] {
+        let mut list = list_json("list");
+        list["_version"] = revision.clone();
+        let list: ExceptionList = serde_json::from_value(list).unwrap();
+        let error = client
+            .exceptions()
+            .update_list(&list.edit())
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidRequest(message) if message.contains("_version")),
+            "{error:?}"
+        );
+
+        let mut item = item_json("item");
+        item["_version"] = revision;
+        let item: ExceptionItem = serde_json::from_value(item).unwrap();
+        let error = client
+            .exceptions()
+            .update_item(&item.edit())
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidRequest(message) if message.contains("_version")),
+            "{error:?}"
+        );
+    }
+    assert_eq!(mock.request_count(), 0);
+}
+
 #[test]
 fn entry_variants_match_the_public_wire_contract() {
     let entries = vec![

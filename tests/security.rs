@@ -383,10 +383,13 @@ async fn patches_cannot_silently_change_the_selector_or_bypass_validation() {
         ("rule_id", json!("other")),
         ("risk_score", json!(500)),
         ("severity", json!("extreme")),
+        ("interval", json!("15m")),
+        ("from", json!("now-1m")),
     ] {
         let error = client
             .security()
             .patch_rule(RuleSelector::Id("a"))
+            .schedule(RuleSchedule::every(Duration::from_secs(300)).unwrap())
             .field(field, value)
             .send()
             .await

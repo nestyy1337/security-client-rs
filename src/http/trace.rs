@@ -42,7 +42,7 @@ impl Request {
         Self {
             operation,
             method: method.clone(),
-            path: path.to_owned(),
+            path: path.split(['?', '#']).next().unwrap_or_default().to_owned(),
             opaque_id,
             started: Instant::now(),
         }

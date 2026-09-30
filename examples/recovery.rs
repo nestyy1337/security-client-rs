@@ -1,6 +1,6 @@
 //! Handling errors: retrying reads, resolving version conflicts and reconciling
 //! a mutation whose outcome is unknown. The client never retries by itself.
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use kibana_rs::{
     Error, Kibana, Result,
@@ -9,36 +9,59 @@ use kibana_rs::{
     security::{DetectionRule, QueryRule, RuleSelector},
 };
 
+#[derive(Debug, thiserror::Error)]
+enum RetryError {
+    #[error("read retry deadline expired")]
+    Deadline,
+    #[error(transparent)]
+    Request(#[from] Error),
+}
+
 /// Retries a read on 429, 502, 503 and transport failures, honoring
 /// `Retry-After` and giving up at an overall deadline. Only use this for
-/// requests that are safe to repeat.
-async fn retry_read<T, F, Fut>(deadline: Duration, mut read: F) -> Result<T>
+/// requests that are safe to repeat. Deadline exhaustion is returned separately
+/// from the last request error.
+async fn retry_read<T, F, Fut>(
+    deadline: Duration,
+    mut read: F,
+) -> std::result::Result<T, RetryError>
 where
     F: FnMut() -> Fut,
     Fut: Future<Output = Result<T>>,
 {
-    let give_up = Instant::now() + deadline;
-    let mut backoff = Duration::from_millis(500);
-    loop {
-        let error = match read().await {
-            Ok(value) => return Ok(value),
-            Err(error) => error,
-        };
-        let transient = matches!(
-            error.status(),
-            Some(
-                StatusCode::TOO_MANY_REQUESTS
-                    | StatusCode::BAD_GATEWAY
-                    | StatusCode::SERVICE_UNAVAILABLE
-            )
-        ) || matches!(error, Error::Transport(_) | Error::Body { .. });
-        let wait = error.retry_after().unwrap_or(backoff);
-        if !transient || Instant::now() + wait > give_up {
-            return Err(error);
+    let give_up = tokio::time::Instant::now() + deadline;
+    tokio::time::timeout_at(give_up, async {
+        let mut backoff = Duration::from_millis(500);
+        loop {
+            if tokio::time::Instant::now() >= give_up {
+                return Err(RetryError::Deadline);
+            }
+            let result = read().await;
+            if tokio::time::Instant::now() >= give_up {
+                return Err(RetryError::Deadline);
+            }
+            let error = match result {
+                Ok(value) => return Ok(value),
+                Err(error) => error,
+            };
+            let transient = matches!(
+                error.status(),
+                Some(
+                    StatusCode::TOO_MANY_REQUESTS
+                        | StatusCode::BAD_GATEWAY
+                        | StatusCode::SERVICE_UNAVAILABLE
+                )
+            ) || matches!(error, Error::Transport(_) | Error::Body { .. });
+            let wait = error.retry_after().unwrap_or(backoff);
+            if !transient {
+                return Err(error.into());
+            }
+            tokio::time::sleep(wait).await;
+            backoff = (backoff * 2).min(Duration::from_secs(30));
         }
-        tokio::time::sleep(wait).await;
-        backoff = (backoff * 2).min(Duration::from_secs(30));
-    }
+    })
+    .await
+    .unwrap_or(Err(RetryError::Deadline))
 }
 
 /// A timeout while sending the request or reading the response leaves the
@@ -134,4 +157,71 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
         Ok(_) => println!("unexpectedly found a case"),
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(start_paused = true)]
+    async fn retry_deadline_cancels_a_slow_success() {
+        for delay in [Duration::from_millis(5), Duration::from_millis(100)] {
+            let result = retry_read(Duration::from_millis(5), || async {
+                tokio::time::sleep(delay).await;
+                Ok(())
+            })
+            .await;
+            assert!(
+                matches!(result, Err(RetryError::Deadline)),
+                "a read completed after its deadline"
+            );
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn no_read_starts_at_or_after_the_retry_deadline() {
+        for budget in [Duration::ZERO, Duration::from_millis(500)] {
+            let attempts = std::cell::Cell::new(0);
+            let result = retry_read(budget, || {
+                attempts.set(attempts.get() + 1);
+                let attempt = attempts.get();
+                async move {
+                    if attempt == 1 {
+                        Err(reqwest::Client::new()
+                            .get("invalid URL")
+                            .build()
+                            .unwrap_err()
+                            .into())
+                    } else {
+                        Ok(())
+                    }
+                }
+            })
+            .await;
+            assert!(
+                matches!(result, Err(RetryError::Deadline)),
+                "a retry succeeded after its deadline"
+            );
+            assert_eq!(attempts.get(), usize::from(!budget.is_zero()));
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn successful_reads_and_permanent_errors_finish_before_the_deadline() {
+        assert_eq!(
+            retry_read(Duration::from_secs(1), || async { Ok(42) })
+                .await
+                .unwrap(),
+            42
+        );
+        let error = retry_read::<(), _, _>(Duration::from_secs(1), || async {
+            Err(Error::InvalidRequest("permanent".into()))
+        })
+        .await
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            RetryError::Request(Error::InvalidRequest(_))
+        ));
+    }
 }

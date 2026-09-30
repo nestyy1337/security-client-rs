@@ -26,7 +26,8 @@ impl PackageRef {
     }
 }
 
-/// A package policy as Kibana returns it, in Fleet's full format.
+/// A package policy as Kibana returns it. Reads use Fleet's full format;
+/// creation and simplified replacement responses use the simplified format.
 ///
 /// `Debug` output omits inputs, variables and other fields, which can hold credentials.
 #[derive(Clone, Deserialize, Serialize)]
@@ -43,7 +44,7 @@ pub struct PackagePolicy {
     pub package: PackageRef,
     #[serde(default)]
     pub policy_ids: Vec<String>,
-    /// Inputs in the full format: an array of inputs with their streams and variables.
+    /// Full-format inputs are an array; simplified inputs are an object keyed by input name.
     #[serde(default)]
     pub inputs: Value,
     /// Package-level variables.
@@ -60,6 +61,8 @@ impl PackagePolicy {
     /// A replacement for this policy in the full format. It keeps the current
     /// inputs, variables and assignments until changed, and is bound to the
     /// policy's ID and concurrency token.
+    /// Fetch a simplified response with [`Fleet::get_package_policy`] before
+    /// editing it. Updating requires full inputs and a nonempty concurrency token.
     pub fn edit(&self) -> PackagePolicyEdit {
         PackagePolicyEdit {
             id: self.id.clone(),
@@ -69,11 +72,23 @@ impl PackagePolicy {
             enabled: self.enabled,
             package: self.package.clone(),
             policy_ids: self.policy_ids.clone(),
-            inputs: self.inputs.clone(),
+            inputs: editable_inputs(self.inputs.clone()),
             vars: self.vars.clone(),
             version: self.version.clone(),
+            full_format: self.inputs.is_array(),
         }
     }
+}
+
+fn editable_inputs(mut inputs: Value) -> Value {
+    if let Some(inputs) = inputs.as_array_mut() {
+        for input in inputs {
+            if let Some(input) = input.as_object_mut() {
+                input.remove("compiled_input");
+            }
+        }
+    }
+    inputs
 }
 
 impl fmt::Debug for PackagePolicy {
@@ -113,6 +128,8 @@ pub struct PackagePolicyEdit {
     vars: Option<Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     version: Option<String>,
+    #[serde(skip)]
+    full_format: bool,
 }
 
 impl PackagePolicyEdit {
@@ -145,7 +162,7 @@ impl PackagePolicyEdit {
     /// Replaces the inputs with a full-format array, typically a modified copy
     /// of [`PackagePolicy::inputs`].
     pub fn inputs(mut self, inputs: Value) -> Self {
-        self.inputs = inputs;
+        self.inputs = editable_inputs(inputs);
         self
     }
 
@@ -344,7 +361,8 @@ impl<'a> Fleet<'a> {
     }
 
     /// Creates a package policy from a [`NewPackagePolicy`] or equivalent JSON
-    /// in the simplified format.
+    /// in the simplified format. The response is also simplified; fetch it with
+    /// [`get_package_policy`](Self::get_package_policy) before editing it.
     pub fn create_package_policy<B: Serialize + ?Sized>(
         &self,
         policy: &B,
@@ -364,6 +382,8 @@ impl<'a> Fleet<'a> {
     /// Replaces a package policy, either with a [`PackagePolicyEdit`] of a
     /// retrieved policy, sent in the full format with its concurrency token, or
     /// with a simplified definition from [`NewPackagePolicy::replacing`].
+    /// Edits with simplified inputs or a missing/empty concurrency token fail
+    /// locally with [`crate::Error::InvalidRequest`].
     pub fn update_package_policy<'p>(
         &self,
         update: impl Into<PackagePolicyUpdate<'p>>,
@@ -379,7 +399,18 @@ impl<'a> Fleet<'a> {
             &["api", "fleet", "package_policies", id],
         );
         UpdatePackagePolicy(match update {
-            PackagePolicyUpdate::Edit(edit) => request.json(edit),
+            PackagePolicyUpdate::Edit(edit) => {
+                let request = if edit.full_format && edit.inputs.is_array() {
+                    request
+                } else {
+                    request.invalid(
+                        "package-policy edits require full inputs; fetch the policy with get_package_policy before editing it".into(),
+                    )
+                };
+                request
+                    .nonempty("version", edit.version.as_deref().unwrap_or_default())
+                    .json(edit)
+            }
             PackagePolicyUpdate::Replace { policy, .. } => {
                 request.param("format", "simplified").json(policy)
             }

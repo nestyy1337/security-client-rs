@@ -475,7 +475,14 @@ endpoint! {
 }
 
 /// Fields [`PatchRule::field`] refuses: the selectors, and values with validated setters.
-const RESERVED_PATCH_FIELDS: &[&str] = &["id", "rule_id", "risk_score", "severity"];
+const RESERVED_PATCH_FIELDS: &[&str] = &[
+    "id",
+    "rule_id",
+    "risk_score",
+    "severity",
+    "interval",
+    "from",
+];
 
 impl PatchRule<'_> {
     pub fn name(self, name: &str) -> Self {
@@ -522,7 +529,7 @@ impl PatchRule<'_> {
     }
 
     /// Sets any other patchable rule field. The selectors `id` and `rule_id`,
-    /// and `risk_score` and `severity`, which have validated setters, fail
+    /// and `risk_score`, `severity`, `interval` and `from`, which have typed setters, fail
     /// with [`Error::InvalidRequest`]; use [`unchecked_field`](Self::unchecked_field)
     /// to send them anyway.
     pub fn field(self, name: &str, value: impl Serialize) -> Self {

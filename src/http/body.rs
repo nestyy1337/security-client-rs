@@ -1,4 +1,4 @@
-use std::fmt;
+use std::{collections::HashSet, fmt};
 
 use bytes::Bytes;
 use reqwest::multipart::{Form, Part};
@@ -6,7 +6,7 @@ use serde::{
     Deserialize, Deserializer, Serialize,
     de::{self, MapAccess, SeqAccess, Visitor},
 };
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::{Error, Result};
 
@@ -32,10 +32,7 @@ impl Body {
     /// Fails with [`Error::InvalidRequest`] when the JSON would repeat an object
     /// key, as a flattened extension map repeating a modeled field does.
     pub fn json<T: Serialize + ?Sized>(value: &T) -> Result<Self> {
-        let value = to_json(value)?;
-        Ok(Self(Content::Json(
-            serde_json::to_vec(&value).map_err(Error::serialize)?.into(),
-        )))
+        Ok(Self(Content::Json(encode_json(value)?.into())))
     }
 
     /// A `multipart/form-data` body with a single file part, as used by Kibana import APIs.
@@ -93,87 +90,112 @@ impl fmt::Debug for Body {
 /// the extension's value, so the transmitted identity would differ from the
 /// typed one.
 pub(crate) fn to_json<T: Serialize + ?Sized>(value: &T) -> Result<Value> {
+    encode_json(value)?;
+    serde_json::to_value(value).map_err(Error::serialize)
+}
+
+fn encode_json<T: Serialize + ?Sized>(value: &T) -> Result<Vec<u8>> {
     let encoded = serde_json::to_vec(value).map_err(Error::serialize)?;
     let mut decoder = serde_json::Deserializer::from_slice(&encoded);
     Unique::deserialize(&mut decoder)
-        .map(|unique| unique.0)
-        .map_err(|error| Error::InvalidRequest(format!("request body {error}")))
+        .and_then(|_| decoder.end())
+        .map_err(|error| Error::InvalidRequest(format!("request body {error}")))?;
+    Ok(encoded)
 }
 
-/// A JSON value whose objects have unique keys.
-struct Unique(Value);
+/// Validates object keys without retaining or converting values.
+struct Unique;
 
 impl<'de> Deserialize<'de> for Unique {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        deserializer.deserialize_any(UniqueVisitor).map(Unique)
+        deserializer.deserialize_any(UniqueVisitor).map(|()| Unique)
     }
 }
 
 struct UniqueVisitor;
 
 impl<'de> Visitor<'de> for UniqueVisitor {
-    type Value = Value;
+    type Value = ();
 
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("a JSON value")
     }
 
-    fn visit_bool<E>(self, value: bool) -> std::result::Result<Value, E> {
-        Ok(Value::Bool(value))
+    fn visit_bool<E>(self, _value: bool) -> std::result::Result<(), E> {
+        Ok(())
     }
 
-    fn visit_i64<E>(self, value: i64) -> std::result::Result<Value, E> {
-        Ok(value.into())
+    fn visit_i64<E>(self, _value: i64) -> std::result::Result<(), E> {
+        Ok(())
     }
 
-    fn visit_u64<E>(self, value: u64) -> std::result::Result<Value, E> {
-        Ok(value.into())
+    fn visit_u64<E>(self, _value: u64) -> std::result::Result<(), E> {
+        Ok(())
     }
 
-    fn visit_f64<E>(self, value: f64) -> std::result::Result<Value, E> {
-        Ok(value.into())
+    fn visit_f64<E>(self, _value: f64) -> std::result::Result<(), E> {
+        Ok(())
     }
 
-    fn visit_str<E>(self, value: &str) -> std::result::Result<Value, E> {
-        Ok(Value::String(value.to_owned()))
+    fn visit_str<E>(self, _value: &str) -> std::result::Result<(), E> {
+        Ok(())
     }
 
-    fn visit_string<E>(self, value: String) -> std::result::Result<Value, E> {
-        Ok(Value::String(value))
+    fn visit_string<E>(self, _value: String) -> std::result::Result<(), E> {
+        Ok(())
     }
 
-    fn visit_unit<E>(self) -> std::result::Result<Value, E> {
-        Ok(Value::Null)
+    fn visit_unit<E>(self) -> std::result::Result<(), E> {
+        Ok(())
     }
 
-    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Value, A::Error> {
-        let mut values = Vec::new();
-        while let Some(Unique(value)) = seq.next_element()? {
-            values.push(value);
-        }
-        Ok(Value::Array(values))
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<(), A::Error> {
+        while seq.next_element::<Unique>()?.is_some() {}
+        Ok(())
     }
 
-    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Value, A::Error> {
-        let mut object = Map::new();
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<(), A::Error> {
+        let mut keys = HashSet::new();
         while let Some(key) = map.next_key::<String>()? {
-            if object.contains_key(&key) {
+            if keys.contains(&key) {
                 return Err(de::Error::custom(format_args!(
                     "repeats the field {key:?}; an extension map may not set a modeled field"
                 )));
             }
-            let Unique(value) = map.next_value()?;
-            object.insert(key, value);
+            keys.insert(key);
+            map.next_value::<Unique>()?;
         }
-        Ok(Value::Object(object))
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use serde_json::json;
+    use serde_json::{Map, json};
 
     use super::*;
+
+    #[test]
+    fn json_keeps_encoded_numbers_exactly() {
+        #[derive(Serialize)]
+        struct Numbers {
+            positive: u128,
+            negative: i128,
+            fraction: f64,
+        }
+        let numbers = Numbers {
+            positive: u64::MAX as u128 + 2,
+            negative: i64::MIN as i128 - 2,
+            fraction: 2.291712365432881e-9,
+        };
+        let Content::Json(bytes) = Body::json(&numbers).unwrap().0 else {
+            panic!("expected JSON");
+        };
+        assert_eq!(
+            std::str::from_utf8(&bytes).unwrap(),
+            serde_json::to_string(&numbers).unwrap()
+        );
+    }
 
     #[test]
     fn repeated_keys_are_rejected_at_any_depth() {
@@ -199,6 +221,7 @@ mod tests {
             "{error:?}"
         );
         assert!(to_json(&json!({"outer": [colliding.extra.clone()]})).is_ok());
+        assert!(Body::json(&colliding).is_err());
         assert!(to_json(&vec![colliding]).is_err());
         assert!(Body::json(&clean).is_ok());
     }

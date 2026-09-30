@@ -48,6 +48,7 @@ pub enum Error {
     #[non_exhaustive]
     Decode {
         status: StatusCode,
+        headers: Box<HeaderMap>,
         /// At most 16 KiB of the response body.
         body: String,
         #[source]
@@ -88,6 +89,7 @@ impl Error {
         match self {
             Self::Api { headers, .. }
             | Self::Body { headers, .. }
+            | Self::Decode { headers, .. }
             | Self::ResponseTooLarge { headers, .. } => Some(headers),
             _ => None,
         }
@@ -183,11 +185,13 @@ impl fmt::Debug for Error {
                 .finish(),
             Self::Decode {
                 status,
+                headers,
                 body,
                 source,
             } => f
                 .debug_struct("Decode")
                 .field("status", status)
+                .field("headers", &names(headers))
                 .field("body_bytes", &body.len())
                 .field("source", source)
                 .finish(),

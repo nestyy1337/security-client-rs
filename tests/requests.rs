@@ -19,6 +19,35 @@ fn unserializable() -> BTreeMap<(u8, u8), u8> {
 }
 
 #[tokio::test]
+async fn json_composition_preserves_floats_and_rejects_unsupported_integers() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    let fraction = 2.291712365432881e-9_f64;
+    mock.json(json!({}));
+    client
+        .request(Method::POST, Scope::Space, &["api", "x"])
+        .json(&BTreeMap::from([("fraction", fraction)]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        mock.take().body,
+        serde_json::to_vec(&json!({"fraction": fraction})).unwrap()
+    );
+
+    for value in [u64::MAX as u128 + 2, u128::MAX] {
+        let error = client
+            .request(Method::POST, Scope::Space, &["api", "x"])
+            .json(&BTreeMap::from([("integer", value)]))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::Serialize(_)), "{error:?}");
+    }
+    assert_eq!(mock.request_count(), 0);
+}
+
+#[tokio::test]
 async fn serialization_failures_are_reported_by_send_without_a_request() {
     let mock = Mock::start().await;
     let client = mock.client();

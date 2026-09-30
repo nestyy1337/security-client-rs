@@ -19,6 +19,31 @@ fn transport(url: &str) -> TransportBuilder {
 }
 
 #[tokio::test]
+async fn decode_errors_keep_response_headers_without_logging_their_values() {
+    let mock = Mock::start().await;
+    mock.reply_with(
+        200,
+        vec![("x-opaque-id", "decode-header-secret".into())],
+        "not json",
+    );
+    let error = mock
+        .client()
+        .status()
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap_err();
+    assert_eq!(error.status(), Some(StatusCode::OK));
+    assert_eq!(
+        error.headers().unwrap()["x-opaque-id"],
+        "decode-header-secret"
+    );
+    assert!(!format!("{error:?}").contains("decode-header-secret"));
+}
+
+#[tokio::test]
 async fn routing_preserves_proxy_prefix_and_encodes_segments_without_scoping_global_routes() {
     let mock = Mock::start_at("/kibana/proxy/").await;
     let client = Kibana::new(

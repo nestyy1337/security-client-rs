@@ -129,6 +129,7 @@ impl<T> Response<T> {
     /// Decodes the body into a type other than the endpoint's default.
     pub async fn json_as<U: DeserializeOwned>(self) -> Result<U> {
         let status = self.status_code();
+        let headers = Box::new(self.headers().clone());
         #[cfg(feature = "tracing")]
         let operation = self.operation;
         let body = self.bytes().await?;
@@ -137,6 +138,7 @@ impl<T> Response<T> {
             super::trace::decode_failed(operation, status, &source);
             Error::Decode {
                 status,
+                headers,
                 body: String::from_utf8_lossy(
                     &body[..body.len().min(super::transport::ERROR_LIMIT)],
                 )
