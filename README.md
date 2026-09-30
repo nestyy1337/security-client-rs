@@ -99,6 +99,10 @@ leave these guarantees to the caller.
 
 Non-success responses become `Error::Api` with the status, headers and up to 16 KiB of body. `Error::message()` returns Kibana's message and `Error::retry_after()` the `Retry-After` delay. When a successful response's body is interrupted or exceeds the limit, `Error::Body` and `Error::ResponseTooLarge` keep its status and headers, available through `Error::status()` and `Error::headers()`.
 
+`bytes_stream()` has no buffered response size limit. Its failures also return
+`Error::Body`, retaining status, headers and the count of bytes delivered before
+the failure.
+
 Bodies may contain operational data and are never printed by `Display` or `Debug`. Neither are response values quoted by decoding errors, query values, or Fleet policy variables; `DecodeError::inner()` returns the full serde error deliberately.
 
 `Error::Decode` reports the JSON error category, line and column through
@@ -109,7 +113,7 @@ Serde message can contain response values and is available explicitly through
 The client does not retry, because whether a retry is safe depends on the request:
 
 - Reads can be retried on 429, 502, 503 and transport failures, honoring `Retry-After`, with backoff and an overall deadline.
-- A mutation interrupted by a timeout or dropped connection, including while its response body is read, may or may not have been applied. Read the resource back by a stable identifier, such as a rule's `rule_id` or a list's `list_id`, before trying again. A successful status on `Error::Body` shows Kibana accepted the request, not what it did.
+- A mutation interrupted by a timeout or dropped connection, including while its response body is read, may or may not have been applied. Read the resource back by a stable identifier, such as a rule's `rule_id` or a list's `list_id`, before trying again. A successful status on `Error::Body`, `Error::Decode` or `Error::ResponseTooLarge` shows Kibana answered successfully, not what it did. Read-back can also exceed the configured size limit; recovery does not raise it automatically.
 - On HTTP 409, read the resource again to get its current version and reapply the change.
 
 [examples/recovery.rs](examples/recovery.rs) implements these patterns. [examples/pagination.rs](examples/pagination.rs) and [examples/transfer.rs](examples/transfer.rs) show collection streams and export and import with partial failures.

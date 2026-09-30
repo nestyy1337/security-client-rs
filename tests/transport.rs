@@ -813,6 +813,72 @@ async fn truncated_server(head: &'static [u8]) -> String {
 }
 
 #[tokio::test]
+async fn interrupted_streams_keep_response_context_and_delivered_byte_counts() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    for chunks in [vec![], vec![&b"stream-"[..], &b"body-secret"[..]]] {
+        let expected_received: usize = chunks.iter().map(|chunk| chunk.len()).sum();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (proceed, mut delivered) = tokio::sync::mpsc::channel(1);
+        let server_chunks = chunks.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0; 4096];
+            let _ = socket.read(&mut buffer).await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 201 Created\r\nx-operation: header-secret\r\ncontent-length: 100\r\n\r\n")
+                .await
+                .unwrap();
+            for chunk in server_chunks {
+                socket.write_all(chunk).await.unwrap();
+                delivered.recv().await.unwrap();
+            }
+        });
+
+        let client = Kibana::new(transport(&url).response_limit(1).build().unwrap());
+        let response = client
+            .request(Method::GET, Scope::Global, &["api", "x"])
+            .query(&[("token", "query-secret")])
+            .send()
+            .await
+            .unwrap();
+        let mut stream = std::pin::pin!(response.bytes_stream());
+        let error = tokio::time::timeout(Duration::from_secs(5), async {
+            for expected in chunks {
+                let mut bytes = Vec::new();
+                while bytes.len() < expected.len() {
+                    bytes.extend_from_slice(&stream.try_next().await.unwrap().unwrap());
+                }
+                assert_eq!(bytes, expected);
+                proceed.send(()).await.unwrap();
+            }
+            stream.try_next().await.unwrap_err()
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(error.status(), Some(StatusCode::CREATED));
+        assert_eq!(error.headers().unwrap()["x-operation"], "header-secret");
+        assert!(error.transport().is_some());
+        assert!(matches!(
+            error,
+            Error::Body { received, .. } if received == expected_received
+        ));
+        let mut chain = format!("{error} {error:?}");
+        let mut source = std::error::Error::source(&error);
+        while let Some(next) = source {
+            chain.push_str(&format!(" {next} {next:?}"));
+            source = next.source();
+        }
+        for secret in ["header-secret", "body-secret", "query-secret"] {
+            assert!(!chain.contains(secret), "{chain}");
+        }
+    }
+}
+
+#[tokio::test]
 async fn an_interrupted_success_body_keeps_status_and_headers() {
     let url = truncated_server(
         b"HTTP/1.1 201 Created\r\nx-operation: op-7\r\ncontent-length: 100\r\n\r\n{\"id\":",
