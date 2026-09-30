@@ -1,30 +1,40 @@
 use std::fmt;
 
+use bytes::Bytes;
 use reqwest::multipart::{Form, Part};
-use serde::Serialize;
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{self, MapAccess, SeqAccess, Visitor},
+};
+use serde_json::{Map, Value};
 
 use crate::{Error, Result};
 
 /// A request body. Endpoint builders create these; use them directly with
 /// [`Transport::send`](super::Transport::send) or [`Request::body`](crate::Request::body).
+///
+/// Cloning shares the encoded bytes.
 #[derive(Clone)]
 pub struct Body(pub(crate) Content);
 
 #[derive(Clone)]
 pub(crate) enum Content {
-    Json(Vec<u8>),
+    Json(Bytes),
     File {
         field: String,
         file_name: String,
         content_type: String,
-        bytes: Vec<u8>,
+        bytes: Bytes,
     },
 }
 
 impl Body {
+    /// Fails with [`Error::InvalidRequest`] when the JSON would repeat an object
+    /// key, as a flattened extension map repeating a modeled field does.
     pub fn json<T: Serialize + ?Sized>(value: &T) -> Result<Self> {
+        let value = to_json(value)?;
         Ok(Self(Content::Json(
-            serde_json::to_vec(value).map_err(Error::serialize)?,
+            serde_json::to_vec(&value).map_err(Error::serialize)?.into(),
         )))
     }
 
@@ -42,7 +52,7 @@ impl Body {
             field: field.into(),
             file_name: file_name.into(),
             content_type: content_type.to_owned(),
-            bytes: bytes.into(),
+            bytes: Bytes::from(bytes.into()),
         }))
     }
 }
@@ -52,9 +62,10 @@ impl Content {
         field: String,
         file_name: String,
         content_type: &str,
-        bytes: Vec<u8>,
+        bytes: Bytes,
     ) -> Result<Form> {
-        let part = Part::bytes(bytes)
+        let length = bytes.len() as u64;
+        let part = Part::stream_with_length(bytes, length)
             .file_name(file_name)
             .mime_str(content_type)
             .map_err(|_| Error::InvalidRequest(format!("invalid content type {content_type:?}")))?;
@@ -72,5 +83,123 @@ impl fmt::Debug for Body {
                 write!(f, "Body::File({file_name:?}, {} bytes)", bytes.len())
             }
         }
+    }
+}
+
+/// Serializes `value` as JSON, rejecting objects that repeat a key.
+///
+/// A struct whose flattened extension map repeats a modeled field, such as
+/// `id`, serializes that key twice; `serde_json::to_value` would silently keep
+/// the extension's value, so the transmitted identity would differ from the
+/// typed one.
+pub(crate) fn to_json<T: Serialize + ?Sized>(value: &T) -> Result<Value> {
+    let encoded = serde_json::to_vec(value).map_err(Error::serialize)?;
+    let mut decoder = serde_json::Deserializer::from_slice(&encoded);
+    Unique::deserialize(&mut decoder)
+        .map(|unique| unique.0)
+        .map_err(|error| Error::InvalidRequest(format!("request body {error}")))
+}
+
+/// A JSON value whose objects have unique keys.
+struct Unique(Value);
+
+impl<'de> Deserialize<'de> for Unique {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
+        deserializer.deserialize_any(UniqueVisitor).map(Unique)
+    }
+}
+
+struct UniqueVisitor;
+
+impl<'de> Visitor<'de> for UniqueVisitor {
+    type Value = Value;
+
+    fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str("a JSON value")
+    }
+
+    fn visit_bool<E>(self, value: bool) -> std::result::Result<Value, E> {
+        Ok(Value::Bool(value))
+    }
+
+    fn visit_i64<E>(self, value: i64) -> std::result::Result<Value, E> {
+        Ok(value.into())
+    }
+
+    fn visit_u64<E>(self, value: u64) -> std::result::Result<Value, E> {
+        Ok(value.into())
+    }
+
+    fn visit_f64<E>(self, value: f64) -> std::result::Result<Value, E> {
+        Ok(value.into())
+    }
+
+    fn visit_str<E>(self, value: &str) -> std::result::Result<Value, E> {
+        Ok(Value::String(value.to_owned()))
+    }
+
+    fn visit_string<E>(self, value: String) -> std::result::Result<Value, E> {
+        Ok(Value::String(value))
+    }
+
+    fn visit_unit<E>(self) -> std::result::Result<Value, E> {
+        Ok(Value::Null)
+    }
+
+    fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> std::result::Result<Value, A::Error> {
+        let mut values = Vec::new();
+        while let Some(Unique(value)) = seq.next_element()? {
+            values.push(value);
+        }
+        Ok(Value::Array(values))
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> std::result::Result<Value, A::Error> {
+        let mut object = Map::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if object.contains_key(&key) {
+                return Err(de::Error::custom(format_args!(
+                    "repeats the field {key:?}; an extension map may not set a modeled field"
+                )));
+            }
+            let Unique(value) = map.next_value()?;
+            object.insert(key, value);
+        }
+        Ok(Value::Object(object))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn repeated_keys_are_rejected_at_any_depth() {
+        #[derive(Serialize)]
+        struct Flattened {
+            id: &'static str,
+            #[serde(flatten)]
+            extra: Map<String, Value>,
+        }
+        let clean = Flattened {
+            id: "a",
+            extra: Map::from_iter([("color".into(), json!("red"))]),
+        };
+        assert_eq!(to_json(&clean).unwrap(), json!({"id": "a", "color": "red"}));
+
+        let colliding = Flattened {
+            id: "a",
+            extra: Map::from_iter([("id".into(), json!("b"))]),
+        };
+        let error = to_json(&colliding).unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidRequest(m) if m.contains("\"id\"")),
+            "{error:?}"
+        );
+        assert!(to_json(&json!({"outer": [colliding.extra.clone()]})).is_ok());
+        assert!(to_json(&vec![colliding]).is_err());
+        assert!(Body::json(&clean).is_ok());
     }
 }

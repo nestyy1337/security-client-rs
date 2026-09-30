@@ -654,6 +654,7 @@ name = "kibana-rs-demo"
 version = "0.0.0"
 dependencies = [
  "axum",
+ "futures-util",
  "kibana-rs",
  "serde",
  "serde_json",

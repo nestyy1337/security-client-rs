@@ -31,7 +31,7 @@ where
                     | StatusCode::BAD_GATEWAY
                     | StatusCode::SERVICE_UNAVAILABLE
             )
-        ) || matches!(error, Error::Transport(_));
+        ) || matches!(error, Error::Transport(_) | Error::Body { .. });
         let wait = error.retry_after().unwrap_or(backoff);
         if !transient || Instant::now() + wait > give_up {
             return Err(error);
@@ -41,16 +41,35 @@ where
     }
 }
 
-/// A timeout on create leaves the outcome unknown, and a retry after a lost
-/// response fails with 409 because the rule exists. Either way the stable
-/// `rule_id` lets the caller read back instead of creating a duplicate.
+/// A timeout while sending the request or reading the response leaves the
+/// outcome unknown, and a retry after a lost response fails with 409 because
+/// the rule exists. Either way the stable `rule_id` lets the caller read back
+/// instead of creating a duplicate. The whole send-and-decode operation is
+/// checked, since the body can fail after Kibana has answered.
 async fn create_or_find(client: &Kibana, rule: &QueryRule, rule_id: &str) -> Result<DetectionRule> {
-    match client.security().create_rule(rule).send().await {
-        Ok(response) => response.json().await,
+    let created = async {
+        client
+            .security()
+            .create_rule(rule)
+            .send()
+            .await?
+            .json()
+            .await
+    }
+    .await;
+    match created {
+        Ok(rule) => Ok(rule),
         Err(error)
-            if matches!(error, Error::Transport(_))
-                || error.status() == Some(StatusCode::CONFLICT) =>
+            if matches!(
+                error,
+                Error::Transport(_) | Error::Body { .. } | Error::Decode { .. }
+            ) || error.status() == Some(StatusCode::CONFLICT) =>
         {
+            // A successful status that arrived before the failure shows Kibana
+            // accepted the request, not that the rule is as requested.
+            if let Some(status) = error.status().filter(|s| s.is_success()) {
+                eprintln!("Kibana answered {status} before the failure; reading the rule back");
+            }
             client
                 .security()
                 .get_rule(RuleSelector::RuleId(rule_id))

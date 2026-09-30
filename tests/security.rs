@@ -1,10 +1,12 @@
 mod common;
 
+use std::time::Duration;
+
 use common::Mock;
 use kibana_rs::{
-    SortOrder,
+    Error, SortOrder,
     exceptions::{ListReference, NamespaceType},
-    security::{QueryLanguage, QueryRule, RiskScore, RuleSelector, Severity},
+    security::{QueryLanguage, QueryRule, RiskScore, RuleSchedule, RuleSelector, Severity},
 };
 use serde_json::{Value, json};
 
@@ -186,8 +188,7 @@ async fn query_rules_serialize_defaults_and_every_option() {
         .severity(Severity::Critical)
         .risk_score(RiskScore::new(99).unwrap())
         .enabled(true)
-        .interval("1m")
-        .from("now-2m")
+        .schedule(RuleSchedule::new(Duration::from_secs(60), Duration::from_secs(60)).unwrap())
         .tags(["soc", "linux"])
         .rule_id("custom-rule")
         .exceptions_list(vec![list]);
@@ -335,4 +336,101 @@ fn risk_scores_above_100_are_rejected() {
         Err(kibana_rs::Error::InvalidRequest(_))
     ));
     assert!(RiskScore::try_from(255).is_err());
+}
+
+#[test]
+fn schedules_derive_a_lookback_covering_the_interval() {
+    let body = |rule: QueryRule| {
+        let value = serde_json::to_value(rule).unwrap();
+        (value["interval"].clone(), value["from"].clone())
+    };
+    let rule = || QueryRule::new("n", "d", "q");
+    assert_eq!(body(rule()), (json!("5m"), json!("now-6m")));
+    let every = |secs| RuleSchedule::every(Duration::from_secs(secs)).unwrap();
+    assert_eq!(
+        body(rule().schedule(every(900))),
+        (json!("15m"), json!("now-16m"))
+    );
+    assert_eq!(
+        body(rule().schedule(every(3540))),
+        (json!("59m"), json!("now-1h"))
+    );
+    let exact = RuleSchedule::new(Duration::from_secs(90), Duration::ZERO).unwrap();
+    assert_eq!(
+        body(rule().schedule(exact)),
+        (json!("90s"), json!("now-90s"))
+    );
+    assert_eq!(exact.lookback(), exact.interval());
+    assert_eq!(
+        body(rule().custom_schedule("1h", "now-2h/h")),
+        (json!("1h"), json!("now-2h/h"))
+    );
+    for invalid in [
+        RuleSchedule::every(Duration::ZERO),
+        RuleSchedule::every(Duration::from_millis(1500)),
+        RuleSchedule::new(Duration::from_secs(60), Duration::from_millis(1)),
+    ] {
+        assert!(matches!(invalid, Err(Error::InvalidRequest(_))));
+    }
+}
+
+#[tokio::test]
+async fn patches_cannot_silently_change_the_selector_or_bypass_validation() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    for (field, value) in [
+        ("id", json!("b")),
+        ("rule_id", json!("other")),
+        ("risk_score", json!(500)),
+        ("severity", json!("extreme")),
+    ] {
+        let error = client
+            .security()
+            .patch_rule(RuleSelector::Id("a"))
+            .field(field, value)
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::InvalidRequest(_)),
+            "{field}: {error:?}"
+        );
+    }
+    for error in [
+        client
+            .security()
+            .patch_rule(RuleSelector::Id(""))
+            .enabled(true)
+            .send()
+            .await
+            .unwrap_err(),
+        client
+            .security()
+            .get_rule(RuleSelector::RuleId(""))
+            .send()
+            .await
+            .unwrap_err(),
+        client
+            .security()
+            .delete_rule(RuleSelector::Id(""))
+            .send()
+            .await
+            .unwrap_err(),
+    ] {
+        assert!(matches!(error, Error::InvalidRequest(_)), "{error:?}");
+    }
+    assert_eq!(mock.request_count(), 0);
+
+    mock.json(rule("a"));
+    client
+        .security()
+        .patch_rule(RuleSelector::Id("a"))
+        .schedule(RuleSchedule::every(Duration::from_secs(600)).unwrap())
+        .unchecked_field("rule_id", "deliberate")
+        .send()
+        .await
+        .unwrap();
+    mock.take().body(json!({
+        "id": "a", "interval": "10m", "from": "now-11m", "rule_id": "deliberate"
+    }));
 }

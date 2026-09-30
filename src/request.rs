@@ -6,6 +6,7 @@ use serde_json::{Map, Value};
 
 use crate::{
     Error, Kibana, Result, Scope,
+    error::Deferred,
     http::{
         Body, Method, Response, Transport,
         headers::{HeaderMap, HeaderName, HeaderValue},
@@ -31,8 +32,9 @@ const SEGMENT: &AsciiSet = &CONTROLS
 /// A request to any Kibana route, created by [`Kibana::request`].
 ///
 /// Every endpoint builder wraps one of these. Construction never fails;
-/// invalid path segments and serialization errors are returned by `send`.
-/// Cloning is cheap enough to reuse a configured request, for example per page.
+/// invalid path segments and serialization errors are returned by `send`,
+/// with the same variant from every clone. Cloning shares the body, so a
+/// configured request can be reused cheaply, for example per page.
 #[derive(Clone)]
 #[must_use = "requests do nothing until sent"]
 pub struct Request<'a> {
@@ -43,13 +45,13 @@ pub struct Request<'a> {
     headers: HeaderMap,
     body: Option<Payload>,
     timeout: Option<Duration>,
-    error: Option<Arc<Error>>,
+    error: Option<Deferred>,
     operation: &'static str,
 }
 
 #[derive(Clone)]
 enum Payload {
-    Json(Value),
+    Json(Arc<Value>),
     Body(Body),
 }
 
@@ -61,7 +63,7 @@ impl<'a> Request<'a> {
         };
         let (path, error) = match path(space, segments) {
             Ok(path) => (path, None),
-            Err(error) => (String::new(), Some(Arc::new(error))),
+            Err(error) => (String::new(), Some(error.into())),
         };
         Self {
             transport: client.transport(),
@@ -87,11 +89,13 @@ impl<'a> Request<'a> {
         self
     }
 
-    /// Sends `body` as JSON, replacing any previous body.
+    /// Sends `body` as JSON, replacing any previous body. A body that would
+    /// repeat an object key, as when a flattened extension map sets a modeled
+    /// field such as `id`, fails with [`Error::InvalidRequest`].
     pub fn json<B: Serialize + ?Sized>(mut self, body: &B) -> Self {
-        match serde_json::to_value(body) {
-            Ok(value) => self.body = Some(Payload::Json(value)),
-            Err(error) => self.fail(Error::serialize(error)),
+        match crate::http::to_json(body) {
+            Ok(value) => self.body = Some(Payload::Json(Arc::new(value))),
+            Err(error) => self.fail(error),
         }
         self
     }
@@ -101,7 +105,8 @@ impl<'a> Request<'a> {
         self
     }
 
-    /// Sets a header on this request only, overriding client defaults.
+    /// Sets a header on this request only. It replaces every value of the same
+    /// name from the transport defaults or the body, including `Content-Type`.
     pub fn header(mut self, name: HeaderName, value: HeaderValue) -> Self {
         self.headers.insert(name, value);
         self
@@ -124,6 +129,33 @@ impl<'a> Request<'a> {
         self
     }
 
+    /// Sets a count parameter that must be at least one, such as a page size.
+    pub(crate) fn positive_param(mut self, key: &str, value: u32) -> Self {
+        if value == 0 {
+            self.fail(Error::InvalidRequest(format!("{key} must be at least 1")));
+        }
+        self.param(key, value)
+    }
+
+    /// Sets a selector query parameter, which must not be empty.
+    pub(crate) fn selector(self, (key, value): (&str, &str)) -> Self {
+        self.nonempty(key, value).param(key, value)
+    }
+
+    /// Fails the request when a required identifier is empty.
+    pub(crate) fn nonempty(mut self, key: &str, value: &str) -> Self {
+        if value.is_empty() {
+            self.fail(Error::InvalidRequest(format!("{key} must not be empty")));
+        }
+        self
+    }
+
+    /// Fails the request with `message`.
+    pub(crate) fn invalid(mut self, message: String) -> Self {
+        self.fail(Error::InvalidRequest(message));
+        self
+    }
+
     /// Adds a query parameter, keeping earlier values with the same key.
     pub(crate) fn append_param(mut self, key: &str, value: impl ToString) -> Self {
         self.query.push((key.to_owned(), value.to_string()));
@@ -132,24 +164,26 @@ impl<'a> Request<'a> {
 
     /// Sets one field of a JSON object body, creating the object if needed.
     pub(crate) fn field(mut self, key: &str, value: impl Serialize) -> Self {
-        let value = match serde_json::to_value(value) {
+        let value = match crate::http::to_json(&value) {
             Ok(value) => value,
             Err(error) => {
-                self.fail(Error::serialize(error));
+                self.fail(error);
                 return self;
             }
         };
-        match &mut self.body {
-            None => {
-                self.body = Some(Payload::Json(Value::Object(Map::from_iter([(
-                    key.to_owned(),
-                    value,
-                )]))))
-            }
-            Some(Payload::Json(Value::Object(object))) => {
-                object.insert(key.to_owned(), value);
-            }
-            Some(_) => self.fail(Error::InvalidRequest(format!(
+        let body = self
+            .body
+            .get_or_insert_with(|| Payload::Json(Arc::new(Value::Object(Map::new()))));
+        match body {
+            Payload::Json(json) => match Arc::make_mut(json) {
+                Value::Object(object) => {
+                    object.insert(key.to_owned(), value);
+                }
+                _ => self.fail(Error::InvalidRequest(format!(
+                    "cannot set {key:?} because the request body is not a JSON object"
+                ))),
+            },
+            Payload::Body(_) => self.fail(Error::InvalidRequest(format!(
                 "cannot set {key:?} because the request body is not a JSON object"
             ))),
         }
@@ -173,13 +207,11 @@ impl<'a> Request<'a> {
 
     pub(crate) async fn send_as<T>(self) -> Result<Response<T>> {
         if let Some(error) = self.error {
-            // A clone shares the deferred error; only the last owner gets the original.
-            return Err(Arc::try_unwrap(error)
-                .unwrap_or_else(|shared| Error::InvalidRequest(shared.to_string())));
+            return Err(error.into());
         }
         let body = match self.body {
             None => None,
-            Some(Payload::Json(value)) => Some(Body::json(&value)?),
+            Some(Payload::Json(value)) => Some(Body::json(&*value)?),
             Some(Payload::Body(body)) => Some(body),
         };
         let query = (!self.query.is_empty()).then_some(&self.query);
@@ -199,7 +231,7 @@ impl<'a> Request<'a> {
     }
 
     fn fail(&mut self, error: Error) {
-        self.error.get_or_insert(Arc::new(error));
+        self.error.get_or_insert_with(|| error.into());
     }
 }
 
@@ -247,7 +279,8 @@ macro_rules! endpoint {
         pub struct $name<'a>($crate::Request<'a>);
 
         impl $name<'_> {
-            /// Sets a header on this request only, overriding client defaults.
+            /// Sets a header on this request only. It replaces every value of the
+            /// same name from the transport defaults or the body.
             pub fn header(
                 self,
                 name: $crate::http::headers::HeaderName,
@@ -271,7 +304,26 @@ pub(crate) use endpoint;
 
 #[cfg(test)]
 mod tests {
+    use serde_json::json;
+
     use super::path;
+    use crate::{Error, Kibana, Scope, http::Method, http::Transport};
+
+    #[tokio::test]
+    async fn fields_cannot_be_merged_into_a_non_object_body() {
+        let client = Kibana::new(Transport::single_node("http://127.0.0.1:9").unwrap());
+        let error = client
+            .request(Method::PUT, Scope::Global, &["api", "x"])
+            .json(&json!(["not", "an", "object"]))
+            .field("id", "a")
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::InvalidRequest(ref message) if message.contains("\"id\"")),
+            "{error:?}"
+        );
+    }
 
     #[test]
     fn segments_are_encoded_individually_and_scoped_to_the_space() {

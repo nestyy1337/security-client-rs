@@ -186,7 +186,7 @@
     "operation_id": "UpdateExceptionListItem",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Explicit optimistic concurrency token; replaces modeled fields. Endpoint artifact validation deferred."
+    "notes": "Resource-derived ItemEdit keeps retrieved fields and unknown entry types, binds ID, namespace and concurrency token, and sends only new comments. Endpoint artifact validation deferred."
   },
   {
     "wrapper": "exceptions.update_list",
@@ -195,7 +195,7 @@
     "operation_id": "UpdateExceptionList",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Explicit optimistic concurrency token; replaces modeled fields, not a patch."
+    "notes": "Resource-derived ListEdit keeps retrieved fields and binds ID, namespace and concurrency token; replaces modeled fields, not a patch."
   },
   {
     "wrapper": "fleet.agent_action_status",
@@ -204,7 +204,7 @@
     "operation_id": "get-fleet-agents-action-status",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. Fleet::wait_for_action polls it."
+    "notes": "Zero-based pagination; preserves failure counts, sampled errors and unknown status/type values. Fleet::wait_for_action searches up to ten pages per check."
   },
   {
     "wrapper": "fleet.agent_status",
@@ -384,7 +384,7 @@
     "operation_id": "get-fleet-agents-agentid",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "Core fields plus extensible JSON."
+    "notes": "Core fields including the acknowledged policy revision, plus extensible JSON."
   },
   {
     "wrapper": "fleet.get_agent_policy",
@@ -528,7 +528,7 @@
     "operation_id": "put-fleet-package-policies-packagepolicyid",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Simplified input format and selected fields only."
+    "notes": "Full-format edits of a retrieved policy with its concurrency token, or simplified replacement; no typed full-format input model."
   },
   {
     "wrapper": "fleet.upgrade_agent",
@@ -645,7 +645,7 @@
     "operation_id": "PatchRule",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Typed common fields and exception-list replacement; any other field through PatchRule::field."
+    "notes": "Typed common fields, schedule and exception-list replacement; other fields through PatchRule::field, which reserves selectors and validated fields."
   },
   {
     "wrapper": "security.privileges",

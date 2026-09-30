@@ -45,6 +45,6 @@ pub mod security;
 pub mod spaces;
 
 pub use client::{Kibana, Scope, SortOrder, Status};
-pub use error::{Error, Result, TransportError};
+pub use error::{DecodeError, Error, Result, TransportError};
 pub use http::Transport;
 pub use request::Request;

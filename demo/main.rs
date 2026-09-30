@@ -6,6 +6,7 @@ use axum::{
     response::{Html, IntoResponse, Response},
     routing::{get, post},
 };
+use futures_util::TryStreamExt;
 use kibana_rs::{
     Error, Kibana,
     cases::{CaseComment, CasePatch, CaseStatus, NewCase, SECURITY_OWNER},
@@ -59,11 +60,14 @@ impl From<Error> for ApiError {
 }
 impl IntoResponse for ApiError {
     fn into_response(self) -> Response {
-        let status = self
-            .0
-            .status()
-            .filter(|s| s.is_client_error())
-            .unwrap_or(StatusCode::BAD_GATEWAY);
+        // Local validation failures are the caller's; other failures come from Kibana.
+        let status = match &self.0 {
+            Error::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+            error => error
+                .status()
+                .filter(|s| s.is_client_error())
+                .unwrap_or(StatusCode::BAD_GATEWAY),
+        };
         let message = self.0.message().unwrap_or_else(|| self.0.to_string());
         (
             status,
@@ -688,19 +692,19 @@ async fn seed(root: &Kibana, space: &str) -> Result<(), Error> {
         .tags(["kibana-rs", "demo"]);
         client.security().create_rule(&rule).send().await?;
     }
-    let existing = client
+    // Every page is checked, so reseeding a busy space does not duplicate objects.
+    let existing: Vec<_> = client
         .cases()
         .find()
         .owner(SECURITY_OWNER)
-        .send()
-        .await?
-        .json()
+        .items()
+        .try_collect()
         .await?;
     for title in [
         "Privileged authentication review",
         "Linux endpoint coverage review",
     ] {
-        if !existing.cases.iter().any(|c| c.title == title) {
+        if !existing.iter().any(|c| c.title == title) {
             let case = NewCase::security(
                 title,
                 "Sample investigation created by kibana-rs. This is demonstration data, not a production incident.",
@@ -710,14 +714,13 @@ async fn seed(root: &Kibana, space: &str) -> Result<(), Error> {
             client.cases().create(&case).send().await?;
         }
     }
-    let mut policies = client
+    let mut policies: Vec<_> = client
         .fleet()
         .find_agent_policies()
-        .send()
-        .await?
-        .json()
-        .await?
-        .items;
+        .full(false)
+        .items()
+        .try_collect()
+        .await?;
     for (name, description) in [
         (
             "SOC Linux endpoints",
@@ -755,18 +758,13 @@ async fn seed(root: &Kibana, space: &str) -> Result<(), Error> {
         .install_package(&package.name, &package.version)
         .send()
         .await?;
-    let installed = client
+    let installed: Vec<_> = client
         .fleet()
         .find_package_policies()
-        .send()
-        .await?
-        .json()
+        .items()
+        .try_collect()
         .await?;
-    if !installed
-        .items
-        .iter()
-        .any(|p| p.name == "Linux system telemetry")
-    {
+    if !installed.iter().any(|p| p.name == "Linux system telemetry") {
         let policy = policies
             .iter()
             .find(|p| p.name == "SOC Linux endpoints")

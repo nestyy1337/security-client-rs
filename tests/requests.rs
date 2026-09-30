@@ -9,6 +9,7 @@ use kibana_rs::{
     cases::CaseStatus,
     http::{Body, Method},
     security::{RuleSelector, Severity},
+    spaces::Space,
 };
 use serde_json::json;
 
@@ -55,19 +56,45 @@ async fn serialization_failures_are_reported_by_send_without_a_request() {
 }
 
 #[tokio::test]
-async fn fields_cannot_be_merged_into_a_non_object_body() {
+async fn extension_maps_cannot_override_modeled_identity() {
     let mock = Mock::start().await;
-    let error = mock
-        .client()
-        .exceptions()
-        .update_list("id", "WzEsMV0=", &json!(["not", "an", "object"]))
-        .send()
-        .await
-        .unwrap_err();
+    let client = mock.client();
+    let mut space = Space::new("intended-space", "Intended");
+    space.extra.insert("color".into(), json!("#aabbcc"));
+    mock.json(json!({"id": "intended-space", "name": "Intended"}));
+    client.spaces().create(&space).send().await.unwrap();
+    mock.take().body(json!({
+        "id": "intended-space", "name": "Intended", "disabledFeatures": [], "color": "#aabbcc"
+    }));
+
+    space.extra.insert("id".into(), json!("other-space"));
+    let error = client.spaces().create(&space).send().await.unwrap_err();
     assert!(
         matches!(error, Error::InvalidRequest(ref message) if message.contains("\"id\"")),
         "{error:?}"
     );
+    assert!(matches!(Body::json(&space), Err(Error::InvalidRequest(_))));
+    assert_eq!(mock.request_count(), 0);
+}
+
+#[tokio::test]
+async fn every_clone_of_a_failed_request_reports_the_same_error() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    let original = client
+        .request(Method::POST, Scope::Space, &["api", "x"])
+        .json(&unserializable());
+    let copies = [original.clone(), original.clone()];
+    for copy in copies {
+        let error = copy.send().await.unwrap_err();
+        assert!(matches!(error, Error::Serialize(_)), "{error:?}");
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "the source survives sharing"
+        );
+    }
+    let error = original.send().await.unwrap_err();
+    assert!(matches!(error, Error::Serialize(_)), "{error:?}");
     assert_eq!(mock.request_count(), 0);
 }
 

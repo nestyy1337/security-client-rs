@@ -126,6 +126,12 @@ async fn requests_are_traced_without_secrets() {
         "{output}"
     );
     assert!(
+        lines.iter().any(|l| l.contains("Kibana response body read")
+            && l.contains("operation=\"GetCase\"")
+            && l.contains("bytes=8")),
+        "reading a body is traced separately from the headers: {output}"
+    );
+    assert!(
         lines
             .iter()
             .any(|l| l.contains("did not match the expected type")

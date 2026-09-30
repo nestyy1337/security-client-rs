@@ -45,9 +45,9 @@ Baseline: the [Kibana 9.5.4 OpenAPI bundle](https://raw.githubusercontent.com/el
 | `exceptions.get_list` | `ReadExceptionList` | `GET /api/exception_lists` | unreviewed | yes | Core fields and extensible response; full contract parity not audited. |
 | `exceptions.import_lists` | `ImportExceptionList` | `POST /api/exception_lists/_import` | partial | yes | Multipart NDJSON with overwrite/as_new_list options; preserves HTTP-200 partial failures. Value-list contents excluded. |
 | `exceptions.summary` | `ReadExceptionListSummary` | `GET /api/exception_lists/summary` | partial | yes | JSON OS summary with optional filter. Upstream can report total=0 when no items have os_types; use find_items().total for item counts. |
-| `exceptions.update_item` | `UpdateExceptionListItem` | `PUT /api/exception_lists/items` | partial | yes | Explicit optimistic concurrency token; replaces modeled fields. Endpoint artifact validation deferred. |
-| `exceptions.update_list` | `UpdateExceptionList` | `PUT /api/exception_lists` | partial | yes | Explicit optimistic concurrency token; replaces modeled fields, not a patch. |
-| `fleet.agent_action_status` | `get-fleet-agents-action-status` | `GET /api/fleet/agents/action_status` | partial | yes | Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. Fleet::wait_for_action polls it. |
+| `exceptions.update_item` | `UpdateExceptionListItem` | `PUT /api/exception_lists/items` | partial | yes | Resource-derived ItemEdit keeps retrieved fields and unknown entry types, binds ID, namespace and concurrency token, and sends only new comments. Endpoint artifact validation deferred. |
+| `exceptions.update_list` | `UpdateExceptionList` | `PUT /api/exception_lists` | partial | yes | Resource-derived ListEdit keeps retrieved fields and binds ID, namespace and concurrency token; replaces modeled fields, not a patch. |
+| `fleet.agent_action_status` | `get-fleet-agents-action-status` | `GET /api/fleet/agents/action_status` | partial | yes | Zero-based pagination; preserves failure counts, sampled errors and unknown status/type values. Fleet::wait_for_action searches up to ten pages per check. |
 | `fleet.agent_status` | `get-fleet-agent-status` | `GET /api/fleet/agent_status` | unreviewed | yes | JSON status summary. |
 | `fleet.bulk_reassign_agents` | `post-fleet-agents-bulk-reassign` | `POST /api/fleet/agents/bulk_reassign` | unreviewed | yes | ID/KQL selection, dryRun, batchSize and includeInactive; typed action or dry-run result. |
 | `fleet.bulk_request_agent_diagnostics` | `post-fleet-agents-bulk-request-diagnostics` | `POST /api/fleet/agents/bulk_request_diagnostics` | partial | yes | ID/KQL selection, dryRun, batchSize and CPU metric; no includeInactive contract. |
@@ -67,7 +67,7 @@ Baseline: the [Kibana 9.5.4 OpenAPI bundle](https://raw.githubusercontent.com/el
 | `fleet.find_agents` | `get-fleet-agents` | `GET /api/fleet/agents` | partial | yes | Page, page size, KQL, inactive agents and sorting; no metrics, status summary or point-in-time paging. Historical operation-level evidence used an empty fleet. |
 | `fleet.find_enrollment_keys` | `get-fleet-enrollment-api-keys` | `GET /api/fleet/enrollment_api_keys` | partial | yes | Explicit pagination and KQL; deprecated duplicate list field omitted. Credentials redacted in Debug. |
 | `fleet.find_package_policies` | `get-fleet-package-policies` | `GET /api/fleet/package_policies` | partial | yes | Page, page size, KQL and sorting; no format or agent-count options. |
-| `fleet.get_agent` | `get-fleet-agents-agentid` | `GET /api/fleet/agents/{agentId}` | unreviewed | yes | Core fields plus extensible JSON. |
+| `fleet.get_agent` | `get-fleet-agents-agentid` | `GET /api/fleet/agents/{agentId}` | unreviewed | yes | Core fields including the acknowledged policy revision, plus extensible JSON. |
 | `fleet.get_agent_policy` | `get-fleet-agent-policies-agentpolicyid` | `GET /api/fleet/agent_policies/{agentPolicyId}` | unreviewed | yes | Core policy fields plus extensible JSON. |
 | `fleet.get_enrollment_key` | `get-fleet-enrollment-api-keys-keyid` | `GET /api/fleet/enrollment_api_keys/{keyId}` | partial | yes | Runtime item envelope; credential is redacted in Debug. Selected fields only. |
 | `fleet.get_package` | `get-fleet-epm-packages-pkgname-pkgversion` | `GET /api/fleet/epm/packages/{pkgName}/{pkgVersion}` | unreviewed | yes | Exact package name/version; core fields plus extensible JSON. |
@@ -83,7 +83,7 @@ Baseline: the [Kibana 9.5.4 OpenAPI bundle](https://raw.githubusercontent.com/el
 | `fleet.unenroll_agent` | `post-fleet-agents-agentid-unenroll` | `POST /api/fleet/agents/{agentId}/unenroll` | partial | - | Force and revoke options. |
 | `fleet.uninstall_package` | `delete-fleet-epm-packages-pkgname-pkgversion` | `DELETE /api/fleet/epm/packages/{pkgName}/{pkgVersion}` | unreviewed | yes | Optional force; JSON result. |
 | `fleet.update_agent_policy` | `put-fleet-agent-policies-agentpolicyid` | `PUT /api/fleet/agent_policies/{agentPolicyId}` | partial | yes | Same typed policy settings as creation; other settings only as caller-supplied JSON. |
-| `fleet.update_package_policy` | `put-fleet-package-policies-packagepolicyid` | `PUT /api/fleet/package_policies/{packagePolicyId}` | partial | yes | Simplified input format and selected fields only. |
+| `fleet.update_package_policy` | `put-fleet-package-policies-packagepolicyid` | `PUT /api/fleet/package_policies/{packagePolicyId}` | partial | yes | Full-format edits of a retrieved policy with its concurrency token, or simplified replacement; no typed full-format input model. |
 | `fleet.upgrade_agent` | `post-fleet-agents-agentid-upgrade` | `POST /api/fleet/agents/{agentId}/upgrade` | partial | yes | Typed request; JSON acknowledgment only. Container agents cannot be upgraded through Fleet. |
 | `roles.delete` | `delete-security-role-name` | `DELETE /api/security/role/{name}` | unreviewed | yes | Single global role deletion; no full contract audit. |
 | `roles.get` | `get-security-role-name` | `GET /api/security/role/{name}` | partial | yes | Kibana privileges, JSON Elasticsearch privileges, description and metadata; read-only fields kept separately. |
@@ -96,7 +96,7 @@ Baseline: the [Kibana 9.5.4 OpenAPI bundle](https://raw.githubusercontent.com/el
 | `security.find_rules` | `FindRules` | `GET /api/detection_engine/rules/_find` | partial | yes | Page, page size, filter and sorting; no field selection or gap filters. |
 | `security.get_rule` | `ReadRule` | `GET /api/detection_engine/rules` | unreviewed | yes | ID or rule_id lookup; response has core fields and an extensible JSON map. |
 | `security.import_rules` | `ImportRules` | `POST /api/detection_engine/rules/_import` | partial | yes | Multipart NDJSON with overwrite, exception, connector and new-list options; HTTP-200 partial failures retained. |
-| `security.patch_rule` | `PatchRule` | `PATCH /api/detection_engine/rules` | partial | yes | Typed common fields and exception-list replacement; any other field through PatchRule::field. |
+| `security.patch_rule` | `PatchRule` | `PATCH /api/detection_engine/rules` | partial | yes | Typed common fields, schedule and exception-list replacement; other fields through PatchRule::field, which reserves selectors and validated fields. |
 | `security.privileges` | `ReadPrivileges` | `GET /api/detection_engine/privileges` | unreviewed | yes | JSON privilege response. |
 | `spaces.create` | `post-spaces-space` | `POST /api/spaces/space` | partial | yes | Typed ID, name, description and disabled features; other fields kept in an extensible map. |
 | `spaces.delete` | `delete-spaces-space-id` | `DELETE /api/spaces/space/{id}` | unreviewed | yes | Single space deletion; no full contract audit. |

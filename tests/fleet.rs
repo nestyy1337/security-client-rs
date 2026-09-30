@@ -5,7 +5,7 @@ use kibana_rs::{
     SortOrder,
     fleet::{
         AgentSelection, BulkActionResult, DiagnosticMetric, NewAgentPolicy, NewPackagePolicy,
-        PackageRef, PolicyInput, PolicyStream,
+        PackagePolicy, PackageRef, PolicyInput, PolicyStream,
     },
 };
 use serde_json::{Value, json};
@@ -156,7 +156,8 @@ async fn agents_are_listed_read_and_managed_individually() {
         .await
         .unwrap()
         .item;
-    assert_eq!(fetched.extra["policy_revision"], 3);
+    assert_eq!(fetched.policy_revision, Some(3));
+    assert_eq!(fetched.extra["tags"], json!(["dmz"]));
     mock.take()
         .route("GET", "/s/soc/api/fleet/agents/a%2F1", &[]);
 
@@ -703,7 +704,7 @@ async fn package_policies_use_the_simplified_format() {
     mock.json(json!({"item": package_policy("pp")}));
     client
         .fleet()
-        .update_package_policy("pp", &definition)
+        .update_package_policy(definition.replacing("pp"))
         .send()
         .await
         .unwrap();
@@ -714,6 +715,45 @@ async fn package_policies_use_the_simplified_format() {
             &[("format", "simplified")],
         )
         .body(expected);
+
+    let full_inputs = json!([{"type": "logfile", "policy_template": "system", "enabled": true,
+        "streams": [{"id": "logfile-system.syslog", "enabled": true,
+                     "data_stream": {"type": "logs", "dataset": "system.syslog"},
+                     "vars": {"paths": {"type": "text", "value": ["/var/log/syslog"]}}}]}]);
+    let mut stored = package_policy("pp");
+    stored["inputs"] = full_inputs.clone();
+    stored["vars"] = json!({"api_key": {"type": "password", "value": "vars-secret"}});
+    stored["version"] = json!("WzMsMV0=");
+    stored["package"]["title"] = json!("System");
+    stored["created_at"] = json!("2026-09-30T00:00:00Z");
+    let retrieved: PackagePolicy = serde_json::from_value(stored).unwrap();
+    assert!(!format!("{retrieved:?}").contains("vars-secret"));
+    let edit = retrieved
+        .edit()
+        .description("Edited")
+        .policy_ids(["p1", "p3"]);
+    assert!(!format!("{edit:?}").contains("vars-secret"));
+    mock.json(json!({"item": package_policy("pp")}));
+    client
+        .fleet()
+        .update_package_policy(&edit)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("PUT", "/s/soc/api/fleet/package_policies/pp", &[])
+        .body(json!({
+            "name": "system-1", "namespace": "default", "description": "Edited", "enabled": true,
+            "package": {"name": "system", "version": "2.5.0", "title": "System"},
+            "policy_ids": ["p1", "p3"], "inputs": full_inputs,
+            "vars": {"api_key": {"type": "password", "value": "vars-secret"}},
+            "version": "WzMsMV0="
+        }));
+    let debug = format!("{definition:?}");
+    assert!(
+        debug.contains("paths") && !debug.contains("/var/log/syslog"),
+        "{debug}"
+    );
 
     mock.json(json!({"id": "pp"}));
     client

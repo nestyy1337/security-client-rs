@@ -1,11 +1,17 @@
 //! Detection exception lists and items. `Single` lists are scoped to a Kibana
 //! space; `Agnostic` lists are shared across spaces. Referenced value-list
 //! contents are managed separately and are not included in exception exports.
+//!
+//! Create lists and items from [`NewList`] and [`NewItem`]. Change existing ones
+//! through [`ExceptionList::edit`] and [`ExceptionItem::edit`], which start from
+//! the retrieved state, so fields that are not changed are sent back as they were.
+//! Retrieved resources also carry their namespace: pass them to `get_*`,
+//! `delete_*` and `find_items` instead of repeating a selector and namespace.
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
 use crate::{
-    Kibana, Scope, SortOrder,
+    Kibana, Request, Scope, SortOrder,
     http::{Method, Raw},
     pagination::paginated,
     request::endpoint,
@@ -77,6 +83,12 @@ pub struct ExceptionList {
     /// Opaque concurrency token, distinct from the user-defined `version`.
     #[serde(rename = "_version", default)]
     pub revision: Option<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub os_types: Vec<OsType>,
+    #[serde(default)]
+    pub meta: Option<Map<String, Value>>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -90,9 +102,27 @@ impl ExceptionList {
             &self.list_type,
         )
     }
+
+    /// A replacement for this list that keeps its current editable fields until
+    /// changed, bound to its ID, namespace and concurrency token.
+    pub fn edit(&self) -> ListEdit {
+        ListEdit {
+            id: self.id.clone(),
+            revision: self.revision.clone(),
+            namespace_type: self.namespace_type,
+            list_type: self.list_type.clone(),
+            name: self.name.clone(),
+            description: self.description.clone(),
+            tags: self.tags.clone(),
+            os_types: self.os_types.clone(),
+            meta: self.meta.clone(),
+            version: None,
+        }
+    }
 }
 
-/// A list definition for [`Exceptions::create_list`] and [`Exceptions::update_list`].
+/// A list definition for [`Exceptions::create_list`]. To change an existing
+/// list, use [`ExceptionList::edit`].
 #[derive(Clone, Debug, Serialize)]
 pub struct NewList {
     name: String,
@@ -169,6 +199,63 @@ impl NewList {
     }
 }
 
+/// Changes to an existing list for [`Exceptions::update_list`], created by
+/// [`ExceptionList::edit`].
+///
+/// Kibana replaces every editable field, so the edit starts from the list as it
+/// was read. A list changed since then fails with HTTP 409; read it again and
+/// reapply the change rather than retrying the same edit.
+#[derive(Clone, Debug, Serialize)]
+pub struct ListEdit {
+    id: String,
+    #[serde(rename = "_version", skip_serializing_if = "Option::is_none")]
+    revision: Option<String>,
+    namespace_type: NamespaceType,
+    #[serde(rename = "type")]
+    list_type: String,
+    name: String,
+    description: String,
+    tags: Vec<String>,
+    os_types: Vec<OsType>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meta: Option<Map<String, Value>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    version: Option<u64>,
+}
+
+impl ListEdit {
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into();
+        self
+    }
+
+    pub fn tags<I: IntoIterator<Item = S>, S: Into<String>>(mut self, tags: I) -> Self {
+        self.tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn os_types(mut self, os_types: Vec<OsType>) -> Self {
+        self.os_types = os_types;
+        self
+    }
+
+    pub fn meta(mut self, meta: Map<String, Value>) -> Self {
+        self.meta = Some(meta);
+        self
+    }
+
+    /// A user-defined version number. Kibana increments it when unset.
+    pub fn version(mut self, version: u64) -> Self {
+        self.version = Some(version);
+        self
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum ListSelector<'a> {
     Id(&'a str),
@@ -180,6 +267,87 @@ impl<'a> ListSelector<'a> {
         match self {
             Self::Id(id) => ("id", id),
             Self::ListId(id) => ("list_id", id),
+        }
+    }
+}
+
+/// A list to read, delete or summarize.
+///
+/// A bare [`ListSelector`] uses the server's default namespace unless the
+/// builder's `namespace_type` is set. A retrieved [`ExceptionList`] or a
+/// [`ListReference`] also selects its own namespace.
+#[derive(Clone, Copy, Debug)]
+pub struct ListTarget<'a> {
+    selector: ListSelector<'a>,
+    namespace: Option<NamespaceType>,
+}
+
+impl<'a> ListTarget<'a> {
+    pub fn new(selector: ListSelector<'a>, namespace: NamespaceType) -> Self {
+        Self {
+            selector,
+            namespace: Some(namespace),
+        }
+    }
+
+    fn apply(self, request: Request<'_>) -> Request<'_> {
+        let request = request.selector(self.selector.pair());
+        match self.namespace {
+            Some(namespace) => request.param("namespace_type", namespace.as_str()),
+            None => request,
+        }
+    }
+}
+
+impl<'a> From<ListSelector<'a>> for ListTarget<'a> {
+    fn from(selector: ListSelector<'a>) -> Self {
+        Self {
+            selector,
+            namespace: None,
+        }
+    }
+}
+
+impl<'a> From<&'a ExceptionList> for ListTarget<'a> {
+    fn from(list: &'a ExceptionList) -> Self {
+        Self::new(ListSelector::Id(&list.id), list.namespace_type)
+    }
+}
+
+impl<'a> From<&'a ListReference> for ListTarget<'a> {
+    fn from(list: &'a ListReference) -> Self {
+        Self::new(ListSelector::Id(&list.id), list.namespace_type)
+    }
+}
+
+/// The list whose items [`Exceptions::find_items`] searches: a `list_id`, or a
+/// retrieved [`ExceptionList`], which also selects its namespace.
+#[derive(Clone, Copy, Debug)]
+pub struct ItemsOf<'a> {
+    list_id: &'a str,
+    namespace: Option<NamespaceType>,
+}
+
+impl<'a> From<&'a str> for ItemsOf<'a> {
+    fn from(list_id: &'a str) -> Self {
+        Self {
+            list_id,
+            namespace: None,
+        }
+    }
+}
+
+impl<'a> From<&'a String> for ItemsOf<'a> {
+    fn from(list_id: &'a String) -> Self {
+        list_id.as_str().into()
+    }
+}
+
+impl<'a> From<&'a ExceptionList> for ItemsOf<'a> {
+    fn from(list: &'a ExceptionList) -> Self {
+        Self {
+            list_id: &list.list_id,
+            namespace: Some(list.namespace_type),
         }
     }
 }
@@ -196,6 +364,45 @@ impl<'a> ItemSelector<'a> {
             Self::Id(id) => ("id", id),
             Self::ItemId(id) => ("item_id", id),
         }
+    }
+}
+
+/// An item to read or delete. See [`ListTarget`] for how the namespace is chosen.
+#[derive(Clone, Copy, Debug)]
+pub struct ItemTarget<'a> {
+    selector: ItemSelector<'a>,
+    namespace: Option<NamespaceType>,
+}
+
+impl<'a> ItemTarget<'a> {
+    pub fn new(selector: ItemSelector<'a>, namespace: NamespaceType) -> Self {
+        Self {
+            selector,
+            namespace: Some(namespace),
+        }
+    }
+
+    fn apply(self, request: Request<'_>) -> Request<'_> {
+        let request = request.selector(self.selector.pair());
+        match self.namespace {
+            Some(namespace) => request.param("namespace_type", namespace.as_str()),
+            None => request,
+        }
+    }
+}
+
+impl<'a> From<ItemSelector<'a>> for ItemTarget<'a> {
+    fn from(selector: ItemSelector<'a>) -> Self {
+        Self {
+            selector,
+            namespace: None,
+        }
+    }
+}
+
+impl<'a> From<&'a ExceptionItem> for ItemTarget<'a> {
+    fn from(item: &'a ExceptionItem) -> Self {
+        Self::new(ItemSelector::Id(&item.id), item.namespace_type)
     }
 }
 
@@ -280,29 +487,36 @@ pub enum Entry {
     },
 }
 
+/// A new comment. Kibana records its author and time.
 #[derive(Clone, Debug, Serialize)]
 pub struct Comment {
     comment: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    id: Option<String>,
 }
 
 impl Comment {
     pub fn new(comment: impl Into<String>) -> Self {
         Self {
             comment: comment.into(),
-            id: None,
         }
-    }
-
-    /// Keeps an existing comment when replacing an item.
-    pub fn id(mut self, id: impl Into<String>) -> Self {
-        self.id = Some(id.into());
-        self
     }
 }
 
-/// An item definition for [`Exceptions::create_item`] and [`Exceptions::update_item`].
+/// A comment stored on an item.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct ItemComment {
+    pub id: String,
+    pub comment: String,
+    #[serde(default)]
+    pub created_at: Option<String>,
+    #[serde(default)]
+    pub created_by: Option<String>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+/// An item definition for [`Exceptions::create_item`]. To change an existing
+/// item, use [`ExceptionItem::edit`].
 #[derive(Clone, Debug, Serialize)]
 pub struct NewItem {
     name: String,
@@ -390,13 +604,127 @@ pub struct ExceptionItem {
     pub name: String,
     pub description: String,
     pub namespace_type: NamespaceType,
-    /// Opaque concurrency token required by [`Exceptions::update_item`].
+    /// Opaque concurrency token, sent by [`ExceptionItem::edit`].
     #[serde(rename = "_version", default)]
     pub revision: Option<String>,
+    #[serde(rename = "type", default = "simple")]
+    pub item_type: String,
     /// JSON preserves entry variants added by newer deployments.
     pub entries: Vec<Value>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub os_types: Vec<OsType>,
+    #[serde(default)]
+    pub comments: Vec<ItemComment>,
+    #[serde(default)]
+    pub expire_time: Option<String>,
+    #[serde(default)]
+    pub meta: Option<Map<String, Value>>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
+}
+
+fn simple() -> String {
+    "simple".into()
+}
+
+impl ExceptionItem {
+    /// A replacement for this item that keeps its current editable fields,
+    /// including entries of types this client does not model, until changed.
+    /// It is bound to the item's ID, namespace and concurrency token.
+    pub fn edit(&self) -> ItemEdit {
+        ItemEdit {
+            id: self.id.clone(),
+            revision: self.revision.clone(),
+            namespace_type: self.namespace_type,
+            item_type: self.item_type.clone(),
+            name: self.name.clone(),
+            description: self.description.clone(),
+            entries: self.entries.clone(),
+            tags: self.tags.clone(),
+            os_types: self.os_types.clone(),
+            comments: Vec::new(),
+            expire_time: self.expire_time.clone(),
+            meta: self.meta.clone(),
+        }
+    }
+}
+
+/// Changes to an existing item for [`Exceptions::update_item`], created by
+/// [`ExceptionItem::edit`].
+///
+/// Kibana replaces every editable field, so the edit starts from the item as it
+/// was read. Comments are append-only: existing comments are always kept, and
+/// only comments added with [`add_comment`](Self::add_comment) are sent. An item
+/// changed since it was read fails with HTTP 409; read it again and reapply the
+/// change rather than retrying the same edit.
+#[derive(Clone, Debug, Serialize)]
+pub struct ItemEdit {
+    id: String,
+    #[serde(rename = "_version", skip_serializing_if = "Option::is_none")]
+    revision: Option<String>,
+    namespace_type: NamespaceType,
+    #[serde(rename = "type")]
+    item_type: String,
+    name: String,
+    description: String,
+    entries: Vec<Value>,
+    tags: Vec<String>,
+    os_types: Vec<OsType>,
+    comments: Vec<Comment>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expire_time: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    meta: Option<Map<String, Value>>,
+}
+
+impl ItemEdit {
+    pub fn name(mut self, name: impl Into<String>) -> Self {
+        self.name = name.into();
+        self
+    }
+
+    pub fn description(mut self, description: impl Into<String>) -> Self {
+        self.description = description.into();
+        self
+    }
+
+    /// Replaces every entry. Entries are combined with AND.
+    pub fn entries(mut self, entries: Vec<Entry>) -> Self {
+        self.entries = entries
+            .iter()
+            .map(|entry| serde_json::to_value(entry).expect("entries serialize as JSON"))
+            .collect();
+        self
+    }
+
+    pub fn tags<I: IntoIterator<Item = S>, S: Into<String>>(mut self, tags: I) -> Self {
+        self.tags = tags.into_iter().map(Into::into).collect();
+        self
+    }
+
+    pub fn os_types(mut self, os_types: Vec<OsType>) -> Self {
+        self.os_types = os_types;
+        self
+    }
+
+    /// Appends a comment to the item's existing comments.
+    pub fn add_comment(mut self, comment: impl Into<String>) -> Self {
+        self.comments.push(Comment::new(comment));
+        self
+    }
+
+    /// An ISO 8601 time after which the item no longer applies.
+    pub fn expire_time(mut self, time: impl Into<String>) -> Self {
+        self.expire_time = Some(time.into());
+        self
+    }
+
+    pub fn meta(mut self, meta: Map<String, Value>) -> Self {
+        self.meta = Some(meta);
+        self
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -434,38 +762,34 @@ impl<'a> Exceptions<'a> {
         )
     }
 
-    pub fn get_list(&self, list: ListSelector<'_>) -> GetList<'a> {
+    /// Reads a list by [`ListSelector`] or from a retrieved [`ExceptionList`].
+    pub fn get_list<'l>(&self, list: impl Into<ListTarget<'l>>) -> GetList<'a> {
         GetList(
-            self.0
-                .request(Method::GET, Scope::Space, &["api", "exception_lists"])
-                .query(&[list.pair()]),
+            list.into().apply(self.0.request(
+                Method::GET,
+                Scope::Space,
+                &["api", "exception_lists"],
+            )),
         )
     }
 
-    /// Replaces the editable fields of list `id`. `revision` is the `_version`
-    /// from the last read; a stale value fails with HTTP 409.
-    pub fn update_list<B: Serialize + ?Sized>(
-        &self,
-        id: &str,
-        revision: &str,
-        list: &B,
-    ) -> UpdateList<'a> {
+    /// Replaces the editable fields of the list the edit was created from. A
+    /// list changed since it was read fails with HTTP 409.
+    pub fn update_list(&self, list: &ListEdit) -> UpdateList<'a> {
         UpdateList(
             self.0
                 .request(Method::PUT, Scope::Space, &["api", "exception_lists"])
-                .json(list)
-                .field("id", id)
-                .field("_version", revision),
+                .json(list),
         )
     }
 
     /// Deletes the list and its items. Detach it from rules first.
-    pub fn delete_list(&self, list: ListSelector<'_>) -> DeleteList<'a> {
-        DeleteList(
-            self.0
-                .request(Method::DELETE, Scope::Space, &["api", "exception_lists"])
-                .query(&[list.pair()]),
-        )
+    pub fn delete_list<'l>(&self, list: impl Into<ListTarget<'l>>) -> DeleteList<'a> {
+        DeleteList(list.into().apply(self.0.request(
+            Method::DELETE,
+            Scope::Space,
+            &["api", "exception_lists"],
+        )))
     }
 
     pub fn find_lists(&self) -> FindLists<'a> {
@@ -489,25 +813,18 @@ impl<'a> Exceptions<'a> {
         )
     }
 
-    pub fn get_item(&self, item: ItemSelector<'_>) -> GetItem<'a> {
-        GetItem(
-            self.0
-                .request(
-                    Method::GET,
-                    Scope::Space,
-                    &["api", "exception_lists", "items"],
-                )
-                .query(&[item.pair()]),
-        )
+    /// Reads an item by [`ItemSelector`] or from a retrieved [`ExceptionItem`].
+    pub fn get_item<'i>(&self, item: impl Into<ItemTarget<'i>>) -> GetItem<'a> {
+        GetItem(item.into().apply(self.0.request(
+            Method::GET,
+            Scope::Space,
+            &["api", "exception_lists", "items"],
+        )))
     }
 
-    /// Replaces the editable fields of item `id`. Omitted fields may be reset by Kibana.
-    pub fn update_item<B: Serialize + ?Sized>(
-        &self,
-        id: &str,
-        revision: &str,
-        item: &B,
-    ) -> UpdateItem<'a> {
+    /// Replaces the editable fields of the item the edit was created from and
+    /// appends its new comments. An item changed since it was read fails with HTTP 409.
+    pub fn update_item(&self, item: &ItemEdit) -> UpdateItem<'a> {
         UpdateItem(
             self.0
                 .request(
@@ -515,52 +832,47 @@ impl<'a> Exceptions<'a> {
                     Scope::Space,
                     &["api", "exception_lists", "items"],
                 )
-                .json(item)
-                .field("id", id)
-                .field("_version", revision),
+                .json(item),
         )
     }
 
-    pub fn delete_item(&self, item: ItemSelector<'_>) -> DeleteItem<'a> {
-        DeleteItem(
-            self.0
-                .request(
-                    Method::DELETE,
-                    Scope::Space,
-                    &["api", "exception_lists", "items"],
-                )
-                .query(&[item.pair()]),
-        )
+    pub fn delete_item<'i>(&self, item: impl Into<ItemTarget<'i>>) -> DeleteItem<'a> {
+        DeleteItem(item.into().apply(self.0.request(
+            Method::DELETE,
+            Scope::Space,
+            &["api", "exception_lists", "items"],
+        )))
     }
 
-    /// One page of items from one list.
+    /// One page of items from one list, given by `list_id` or as a retrieved
+    /// [`ExceptionList`], which also selects its namespace.
     ///
     /// Kibana splits list IDs and filters on commas after URL decoding, so
     /// literal commas in these values are not supported.
-    pub fn find_items(&self, list_id: &str) -> FindItems<'a> {
-        FindItems(
-            self.0
-                .request(
-                    Method::GET,
-                    Scope::Space,
-                    &["api", "exception_lists", "items", "_find"],
-                )
-                .param("list_id", list_id),
-        )
+    pub fn find_items<'l>(&self, list: impl Into<ItemsOf<'l>>) -> FindItems<'a> {
+        let list = list.into();
+        let request = self
+            .0
+            .request(
+                Method::GET,
+                Scope::Space,
+                &["api", "exception_lists", "items", "_find"],
+            )
+            .selector(("list_id", list.list_id));
+        FindItems(match list.namespace {
+            Some(namespace) => request.param("namespace_type", namespace.as_str()),
+            None => request,
+        })
     }
 
     /// Item counts per operating system. Lists without OS-tagged items can report
     /// `total: 0`; use [`find_items`](Self::find_items) for the item count.
-    pub fn summary(&self, list: ListSelector<'_>) -> Summary<'a> {
-        Summary(
-            self.0
-                .request(
-                    Method::GET,
-                    Scope::Space,
-                    &["api", "exception_lists", "summary"],
-                )
-                .query(&[list.pair()]),
-        )
+    pub fn summary<'l>(&self, list: impl Into<ListTarget<'l>>) -> Summary<'a> {
+        Summary(list.into().apply(self.0.request(
+            Method::GET,
+            Scope::Space,
+            &["api", "exception_lists", "summary"],
+        )))
     }
 
     pub fn duplicate_list(
@@ -576,7 +888,7 @@ impl<'a> Exceptions<'a> {
                     Scope::Space,
                     &["api", "exception_lists", "_duplicate"],
                 )
-                .param("list_id", list_id)
+                .selector(("list_id", list_id))
                 .param("namespace_type", namespace.as_str())
                 .param("include_expired_exceptions", include_expired),
         )
@@ -629,11 +941,11 @@ macro_rules! find_setters {
         impl $name<'_> {
             /// One-based page number.
             pub fn page(self, page: u32) -> Self {
-                Self(self.0.param("page", page))
+                Self(self.0.positive_param("page", page))
             }
 
             pub fn per_page(self, per_page: u32) -> Self {
-                Self(self.0.param("per_page", per_page))
+                Self(self.0.positive_param("per_page", per_page))
             }
 
             /// A KQL filter over list or item attributes.
