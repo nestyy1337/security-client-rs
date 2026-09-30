@@ -708,6 +708,21 @@ async fn fleet_policy_and_integration_lifecycle() {
         assert_eq!(updated.description, fetched.description);
         assert_eq!(updated.extra["inactivity_timeout"], 3600);
         assert_eq!(updated.extra["monitoring_enabled"], json!(["logs"]));
+        let matching_id = json!({
+            "id": updated.id,
+            "name": updated.name,
+            "namespace": updated.namespace,
+            "inactivity_timeout": updated.extra["inactivity_timeout"],
+        });
+        let updated = fleet
+            .update_agent_policy(&updated.id, &matching_id)
+            .send()
+            .await?
+            .json()
+            .await?
+            .item;
+        assert_eq!(updated.id, fetched.id);
+        assert_eq!(updated.name, "Updated SOC endpoints");
         let outputs = fleet.list_outputs().send().await?.json().await?;
         let default_output = outputs["items"]
             .as_array()

@@ -2,10 +2,49 @@ mod common;
 
 use common::Mock;
 use kibana_rs::{
+    Error,
     roles::{KibanaPrivilege, RoleDefinition},
     spaces::Space,
 };
 use serde_json::{Map, json};
+
+#[tokio::test]
+async fn space_updates_require_a_body_id_matching_the_path() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let error = client
+        .spaces()
+        .update("soc", &Space::new("prod", "Production"))
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(error, Error::InvalidRequest(_)));
+    for body in [
+        json!({"id": "prod", "name": "Production"}),
+        json!({"name": "Missing ID"}),
+        json!({"id": null}),
+        json!({"id": 1}),
+        json!({"id": ""}),
+        json!([{"id": "soc"}]),
+        json!(null),
+    ] {
+        let error = client
+            .spaces()
+            .update("soc", &body)
+            .send()
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::InvalidRequest(_)), "{error:?}");
+    }
+    assert_eq!(mock.request_count(), 0);
+
+    let body = json!({"id": "soc", "name": "Renamed", "color": "#aabbcc"});
+    mock.json(body.clone());
+    client.spaces().update("soc", &body).send().await.unwrap();
+    mock.take()
+        .route("PUT", "/api/spaces/space/soc", &[])
+        .body(body);
+}
 
 #[tokio::test]
 async fn spaces_are_global_even_on_a_scoped_client() {

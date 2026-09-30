@@ -69,12 +69,20 @@ More examples are in [examples/](examples/).
 - Agent policies use `policy.edit()?` and `fleet.edit_agent_policy(&edit)` to retain their inactivity timeout and change selected settings. `data_output_id(id)` selects an output; `clear_data_output_id()` sends null to restore Fleet's default. Unset optional fields keep their server values. Agent-policy updates have no concurrency check.
 - Headers are combined once per request: built-in defaults and credentials, transport headers, the body's `Content-Type`, then per-request headers. Each stage replaces every earlier value of a name it sets.
 
-Every named builder has `into_request()` to preserve its route, scope and settings
-while adding options through the raw request interface. `Request::query` appends
-parameters; avoid adding a second value for an existing single-valued option.
 Case updates accept extra fields through `CasePatch::field`, which rejects `id`
 and `version` so the patch keeps its resource identity and concurrency token.
+Checked rule patch fields also reserve selectors. Space updates require a body
+`id` matching the URL; generic agent-policy updates allow `id` to be omitted,
+but reject a conflicting or non-string value before HTTP.
 Extension fields must be supported by the target Kibana version.
+
+Every named builder has `into_request()` to preserve its route, scope and settings
+while adding options through the raw request interface. Replacing the raw body
+with `Request::json` or `Request::body` does not reapply the builder's identity
+or concurrency checks. Earlier construction errors still fail at `send`.
+`Request::query` appends parameters; avoid adding a second value for an existing
+selector or other single-valued option. `unchecked_field` and raw replacements
+leave these guarantees to the caller.
 
 ## Behavior to know
 

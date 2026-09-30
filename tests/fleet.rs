@@ -441,6 +441,46 @@ async fn action_history_cancellation_uploads_and_binary_downloads() {
 }
 
 #[tokio::test]
+async fn agent_policy_updates_check_optional_body_ids_against_the_path() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    for body in [
+        json!({"id": "other-policy", "name": "Wrong policy", "namespace": "default"}),
+        json!({"id": null}),
+        json!({"id": 1}),
+        json!({"id": ""}),
+        json!([{"id": "p/1"}]),
+        json!(null),
+    ] {
+        let error = client
+            .fleet()
+            .update_agent_policy("p/1", &body)
+            .send()
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::InvalidRequest(_)), "{error:?}");
+    }
+    assert_eq!(mock.request_count(), 0);
+
+    for body in [
+        json!({"name": "SOC Linux", "namespace": "default"}),
+        json!({"id": "p/1", "name": "SOC Linux", "namespace": "default",
+            "future_setting": {"id": "another-id"}}),
+    ] {
+        mock.json(json!({"item": policy("p/1")}));
+        client
+            .fleet()
+            .update_agent_policy("p/1", &body)
+            .send()
+            .await
+            .unwrap();
+        mock.take()
+            .route("PUT", "/s/soc/api/fleet/agent_policies/p%2F1", &[])
+            .body(body);
+    }
+}
+
+#[tokio::test]
 async fn agent_policy_edits_bind_identity_and_only_send_requested_settings() {
     let mock = Mock::start().await;
     let client = mock.soc();

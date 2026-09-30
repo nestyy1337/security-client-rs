@@ -79,6 +79,8 @@ impl<'a> Request<'a> {
     }
 
     /// Appends URL-encoded query parameters serialized from `query`.
+    /// Avoid adding a second value for an existing selector or other
+    /// single-valued parameter; raw query additions do not check for conflicts.
     pub fn query<Q: Serialize + ?Sized>(mut self, query: &Q) -> Self {
         match serde_urlencoded::to_string(query) {
             Ok(encoded) => self
@@ -92,6 +94,11 @@ impl<'a> Request<'a> {
     /// Sends `body` as JSON, replacing any previous body. A body that would
     /// repeat an object key, as when a flattened extension map sets a modeled
     /// field such as `id`, fails with [`Error::InvalidRequest`].
+    ///
+    /// This is a raw replacement: it does not reapply the named builder's
+    /// selector, concurrency or URL/body identity checks. The caller must
+    /// retain those fields. An earlier construction error is still returned
+    /// by `send`, even if the replacement body would be valid.
     pub fn json<B: Serialize + ?Sized>(mut self, body: &B) -> Self {
         match crate::http::to_json(body) {
             Ok(value) => self.body = Some(Payload::Json(Arc::new(value))),
@@ -100,8 +107,34 @@ impl<'a> Request<'a> {
         self
     }
 
+    /// Replaces the body without reapplying named-builder checks, as with
+    /// [`Self::json`]. Earlier construction errors still fail at `send`.
     pub fn body(mut self, body: Body) -> Self {
         self.body = Some(Payload::Body(body));
+        self
+    }
+
+    /// Checks the top-level JSON ID against the path argument. Some update
+    /// contracts require it; others allow it to be omitted.
+    pub(crate) fn check_body_id(mut self, id: &str, required: bool) -> Self {
+        if self.error.is_some() {
+            return self;
+        }
+        let object = match self.body.as_ref() {
+            Some(Payload::Json(body)) => body.as_object(),
+            _ => None,
+        };
+        let error = match object {
+            None => Some("request body must be a JSON object"),
+            Some(object) => match object.get("id") {
+                None if !required => None,
+                Some(Value::String(body_id)) if body_id == id => None,
+                _ => Some("request body id must be a string matching the path id"),
+            },
+        };
+        if let Some(error) = error {
+            self.fail(Error::InvalidRequest(error.into()));
+        }
         self
     }
 
@@ -281,6 +314,9 @@ macro_rules! endpoint {
         impl<'a> $name<'a> {
             /// Converts this builder to a raw request, preserving its configured
             /// route, scope, parameters, body, headers and timeout.
+            /// Replacing the raw body does not reapply this builder's identity,
+            /// concurrency or typed-field checks. Existing construction errors
+            /// remain errors and cannot be repaired through the raw request.
             pub fn into_request(self) -> $crate::Request<'a> {
                 self.0.named(stringify!($name))
             }

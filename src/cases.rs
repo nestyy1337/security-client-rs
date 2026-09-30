@@ -160,6 +160,19 @@ impl CasePatch {
 
     /// Sets an additional patchable field. The case ID and concurrency version
     /// are reserved; supply them through [`Self::new`].
+    ///
+    /// ```
+    /// use kibana_rs::{Error, cases::CasePatch};
+    /// use serde_json::{json, to_value};
+    ///
+    /// let patch = CasePatch::new("case-a", "version-1");
+    /// assert!(matches!(patch.clone().field("id", "case-b"), Err(Error::InvalidRequest(_))));
+    /// assert!(matches!(patch.clone().field("version", "version-2"), Err(Error::InvalidRequest(_))));
+    /// let body = to_value(patch.field("assignees", json!([]))?)?;
+    /// assert_eq!(body["id"], "case-a");
+    /// assert_eq!(body["version"], "version-1");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
     pub fn field(self, name: &str, value: impl Serialize) -> Result<Self> {
         if matches!(name, "id" | "version") {
             return Err(Error::InvalidRequest(format!(

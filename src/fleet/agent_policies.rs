@@ -272,6 +272,11 @@ impl<'a> Fleet<'a> {
     /// Name and namespace are required. Omitting `inactivity_timeout` resets
     /// it to the server's default; prefer [`edit_agent_policy`](Self::edit_agent_policy)
     /// with a retrieved policy's edit to retain it.
+    ///
+    /// The body must be a JSON object. Its optional `id` must be a string
+    /// matching the path argument; conflicts fail locally with
+    /// [`Error::InvalidRequest`]. This generic body does not bind an edit's
+    /// captured ID or project writable fields; use `edit_agent_policy` for that.
     pub fn update_agent_policy<B: Serialize + ?Sized>(
         &self,
         id: &str,
@@ -284,7 +289,8 @@ impl<'a> Fleet<'a> {
                     Scope::Space,
                     &["api", "fleet", "agent_policies", id],
                 )
-                .json(policy),
+                .json(policy)
+                .check_body_id(id, false),
         )
     }
 
