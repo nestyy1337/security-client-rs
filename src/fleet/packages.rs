@@ -103,6 +103,7 @@ endpoint! {
 }
 
 impl UninstallPackage<'_> {
+    /// Deletes the package even when it has active package policies.
     pub fn force(self, force: bool) -> Self {
         Self(self.0.param("force", force))
     }

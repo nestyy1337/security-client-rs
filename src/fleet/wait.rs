@@ -15,6 +15,10 @@ impl<'a> Fleet<'a> {
     /// seen and then can no longer be found, for example because newer actions
     /// pushed it out of that window, ends the
     /// wait as [`WaitOutcome::Vanished`] with its last state.
+    ///
+    /// A finished action can contain failed agents. Unknown action statuses also
+    /// end the wait for inspection; check the status, failure count and errors
+    /// on the returned [`AgentActionStatus`].
     pub async fn wait_for_action(
         &self,
         action_id: &str,

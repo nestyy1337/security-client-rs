@@ -8,6 +8,8 @@ use crate::{
     request::endpoint,
 };
 
+/// Space settings for administration. Selecting a client space with
+/// [`Kibana::space`] does not create or change these settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Space {

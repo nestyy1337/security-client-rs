@@ -185,11 +185,15 @@ impl TransportBuilder {
     }
 
     /// The largest body `Response::json`, `bytes` and `text` will read.
+    /// Streaming with [`Response::bytes_stream`] bypasses this limit.
+    /// A zero limit fails when [`Self::build`] is called.
     pub fn response_limit(mut self, bytes: usize) -> Self {
         self.response_limit = bytes;
         self
     }
 
+    /// Builds the connection pool and validates its settings. Invalid base URLs,
+    /// credentials, certificates or proxy settings return [`Error::Configuration`].
     pub fn build(self) -> Result<Transport> {
         let url = self.url;
         if !matches!(url.scheme(), "http" | "https")

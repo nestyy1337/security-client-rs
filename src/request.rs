@@ -151,6 +151,9 @@ impl<'a> Request<'a> {
         self
     }
 
+    /// Sends the request and checks its HTTP status. A successful response's body
+    /// is read separately with [`Response::json`], [`Response::bytes`] or a stream.
+    /// Construction errors are returned before HTTP. Requests are never retried.
     pub async fn send(self) -> Result<Response> {
         self.send_as().await
     }
@@ -336,6 +339,9 @@ macro_rules! endpoint {
                 Self(self.0.request_timeout(timeout))
             }
 
+            /// Sends the request and checks its HTTP status. The successful body
+            /// remains unread; consume it through [`Response`](crate::http::Response).
+            /// Construction errors are returned before HTTP. Requests are never retried.
             pub async fn send(self) -> $crate::Result<$crate::http::Response<$output>> {
                 self.into_request().send_as().await
             }

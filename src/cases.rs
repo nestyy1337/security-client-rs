@@ -1,4 +1,9 @@
 //! Cases and their comments. Updates use optimistic concurrency through case versions.
+//!
+//! Create a [`NewCase`], then build [`CasePatch`] values with the IDs and versions
+//! from the latest read. The owner identifies the Kibana solution handling the
+//! case; comments must use the same owner. [`NewCase::security`] and
+//! [`SECURITY_OWNER`] select the Security solution.
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
@@ -13,6 +18,7 @@ use crate::{
 /// The case owner used by the Security solution.
 pub const SECURITY_OWNER: &str = "securitySolution";
 
+/// A case returned by Kibana. Use its ID and current version to build a [`CasePatch`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Case {
@@ -117,6 +123,7 @@ impl NewCase {
 }
 
 /// Changes to one case. Only the fields set here are sent.
+/// Unset fields retain their server values; an empty tag list removes all tags.
 #[derive(Clone, Debug, Serialize)]
 pub struct CasePatch {
     id: String,

@@ -64,6 +64,9 @@ pub enum WaitOutcome<T> {
 }
 
 impl<T> WaitOutcome<T> {
+    /// Returns the state only for [`Self::Finished`]. This says that waiting ended,
+    /// not that the operation succeeded. Use [`Self::last`] to inspect a state
+    /// retained after a timeout or disappearance.
     pub fn finished(self) -> Option<T> {
         match self {
             Self::Finished(value) => Some(value),

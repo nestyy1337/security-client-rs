@@ -40,6 +40,7 @@ pub struct PackagePolicy {
     pub description: Option<String>,
     #[serde(default)]
     pub enabled: Option<bool>,
+    /// Configuration revision, distinct from the opaque concurrency [`version`](Self::version).
     pub revision: u64,
     pub package: PackageRef,
     #[serde(default)]
@@ -61,8 +62,30 @@ impl PackagePolicy {
     /// A replacement for this policy in the full format. It keeps the current
     /// inputs, variables and assignments until changed, and is bound to the
     /// policy's ID and concurrency token.
-    /// Fetch a simplified response with [`Fleet::get_package_policy`] before
-    /// editing it. Updating requires full inputs and a nonempty concurrency token.
+    /// If the response has simplified inputs, fetch the full policy with
+    /// [`Fleet::get_package_policy`] before editing it. Sending an edit requires
+    /// full inputs and a nonempty concurrency token; construction does not check
+    /// them. Response-only `compiled_input` fields are removed from the inputs.
+    ///
+    /// ```
+    /// use kibana_rs::fleet::PackagePolicy;
+    /// use serde_json::{from_value, json, to_value};
+    ///
+    /// let policy: PackagePolicy = from_value(json!({
+    ///     "id": "integration-a", "name": "system-1", "namespace": "default",
+    ///     "revision": 2, "version": "opaque-token", "policy_ids": ["policy-a"],
+    ///     "package": {"name": "system", "version": "2.24.0"},
+    ///     "inputs": [{"type": "logfile", "enabled": true, "streams": [],
+    ///                 "compiled_input": {"type": "logfile"}}]
+    /// }))?;
+    /// let body = to_value(policy.edit().name("SOC system"))?;
+    /// assert_eq!(body["version"], "opaque-token");
+    /// assert_eq!(body["policy_ids"], json!(["policy-a"]));
+    /// assert_eq!(body["inputs"][0]["enabled"], true);
+    /// assert!(body["inputs"][0].get("compiled_input").is_none());
+    /// assert!(body.get("id").is_none()); // The edit binds the URL's ID instead.
+    /// # Ok::<(), serde_json::Error>(())
+    /// ```
     pub fn edit(&self) -> PackagePolicyEdit {
         PackagePolicyEdit {
             id: self.id.clone(),

@@ -30,6 +30,11 @@
 //! never retried and redirects are never followed. Non-success statuses become
 //! [`Error::Api`]. Routes without a named builder are available through
 //! [`Kibana::request`].
+//!
+//! Module documentation covers the workflows: [`security`] for rule selectors
+//! and imports, [`exceptions`] and [`cases`] for edits with concurrency tokens,
+//! [`fleet`] for integration formats and asynchronous actions, and [`pagination`]
+//! and [`poll`] for bounded traversal and waiting.
 
 pub mod cases;
 mod client;

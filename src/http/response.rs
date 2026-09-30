@@ -22,6 +22,10 @@ pub enum Raw {}
 /// turns them into [`Error::Api`]. A failure while reading the body keeps the
 /// status and headers: [`Error::Body`] for an interrupted body and
 /// [`Error::ResponseTooLarge`] above the transport limit.
+///
+/// The body is read only when a consuming method is called. Choose one reader;
+/// capture any headers needed afterward before consuming the response. A successful
+/// HTTP status alone does not establish that the body is valid or an import fully succeeded.
 pub struct Response<T = Value> {
     inner: reqwest::Response,
     limit: usize,
@@ -164,6 +168,9 @@ impl<T> Response<T> {
 }
 
 impl<T: DeserializeOwned> Response<T> {
+    /// Reads and decodes the body into the endpoint's response type.
+    /// Invalid JSON or a mismatched shape returns [`Error::Decode`] with response
+    /// status and headers. Reading remains subject to the transport's size limit.
     pub async fn json(self) -> Result<T> {
         self.json_as().await
     }

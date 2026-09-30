@@ -12,14 +12,19 @@ use crate::{
     request::endpoint,
 };
 
-/// `Debug` output counts package policies instead of printing them, since
-/// their variables can hold credentials.
+/// An agent policy returned by Fleet, grouping the integrations assigned to agents.
+///
+/// Use [`Self::edit`] to change a retrieved policy while retaining its inactivity
+/// timeout. `Debug` output counts package policies instead of printing them,
+/// since their variables can hold credentials.
 #[derive(Clone, Deserialize, Serialize)]
 #[non_exhaustive]
 pub struct AgentPolicy {
     pub id: String,
     pub name: String,
+    /// Namespace used for the policy's data streams, independent of the Kibana space.
     pub namespace: String,
+    /// Configuration delivery revision. Fleet does not use it to reject concurrent edits.
     pub revision: u64,
     #[serde(default)]
     pub description: Option<String>,
@@ -31,6 +36,7 @@ pub struct AgentPolicy {
     /// Populated when listed with full policies.
     #[serde(default)]
     pub package_policies: Vec<Value>,
+    /// Unmodeled response fields. An edit resubmits only the supported writable fields.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -47,6 +53,25 @@ impl AgentPolicy {
     ///
     /// Fleet agent-policy updates do not enforce optimistic concurrency;
     /// [`revision`](Self::revision) tracks configuration delivery to agents.
+    ///
+    /// Renaming retains the timeout and leaves other optional settings unset:
+    ///
+    /// ```
+    /// use kibana_rs::fleet::AgentPolicy;
+    /// use serde_json::{from_value, json, to_value};
+    ///
+    /// let policy: AgentPolicy = from_value(json!({
+    ///     "id": "policy-a", "name": "Endpoints", "namespace": "default",
+    ///     "revision": 3, "inactivity_timeout": 3600, "description": "Keep this"
+    /// }))?;
+    /// let body = to_value(policy.edit()?.name("SOC endpoints"))?;
+    /// assert_eq!(body, json!({
+    ///     "name": "SOC endpoints", "namespace": "default", "inactivity_timeout": 3600
+    /// }));
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    ///
+    /// To apply an edit:
     ///
     /// ```no_run
     /// # async fn rename(client: &kibana_rs::Kibana) -> kibana_rs::Result<()> {
@@ -92,6 +117,7 @@ impl fmt::Debug for AgentPolicy {
 /// [`Fleet::update_agent_policy`].
 /// For changes to a retrieved policy, prefer [`AgentPolicy::edit`] to retain
 /// its inactivity timeout instead of accepting the server's default.
+/// Optional settings are omitted until their setter is called.
 #[derive(Clone, Debug, Serialize)]
 pub struct NewAgentPolicy {
     name: String,
@@ -380,6 +406,7 @@ endpoint! {
 }
 
 impl DeleteAgentPolicy<'_> {
+    /// Bypasses server validation checks that would otherwise prevent deletion.
     pub fn force(self, force: bool) -> Self {
         Self(self.0.field("force", force))
     }
