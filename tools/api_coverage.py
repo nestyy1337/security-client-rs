@@ -20,17 +20,18 @@ VERBS = {"get", "post", "put", "patch", "delete", "head", "options", "trace"}
 NON_ENDPOINTS = {
     "client.cases", "client.default_space", "client.exceptions", "client.fleet", "client.request",
     "client.roles", "client.security", "client.space", "client.space_id", "client.spaces", "client.transport",
-    "exceptions.reference", "fleet.is_finished",
+    "exceptions.edit", "exceptions.reference", "fleet.as_str", "fleet.edit", "fleet.edit_agent_policy", "fleet.is_finished",
     "fleet.wait_for_action", "fleet.wait_for_agent_policy", "fleet.wait_for_upload",
 }
 # Helpers that send requests through named builders. A test calling the helper exercises them.
 HELPER_CALLS = {
+    "fleet.edit_agent_policy": {"fleet.update_agent_policy"},
     "fleet.wait_for_action": {"fleet.agent_action_status"},
     "fleet.wait_for_agent_policy": {"fleet.get_agent"},
     "fleet.wait_for_upload": {"fleet.list_agent_uploads"},
 }
-# Modules without endpoints.
-NON_ENDPOINT_MODULES = {"error.rs", "lib.rs", "pagination.rs", "poll.rs", "request.rs"}
+# Modules without endpoints. A directory module such as `fleet/` is one namespace.
+NON_ENDPOINT_MODULES = {"error", "http", "lib", "pagination", "poll", "request"}
 # Live suites need a deployment; wire tests must run offline in every CI job.
 LIVE_TESTS = {"live.rs", "deployment.rs"}
 
@@ -69,13 +70,14 @@ def wrappers(root):
     """
     result = {}
     pattern = r"\.request\(\s*Method::(\w+),\s*Scope::(\w+),\s*&\[([^\]]+)\]"
-    for source in sorted((root / "src").glob("*.rs")):
-        if source.name in NON_ENDPOINT_MODULES:
+    for source in sorted((root / "src").rglob("*.rs")):
+        namespace = source.relative_to(root / "src").parts[0].removesuffix(".rs")
+        if namespace in NON_ENDPOINT_MODULES:
             continue
         code = source.read_text()
         functions = list(re.finditer(r"pub (?:async )?fn (\w+)\b[^(]*\(\s*&self", code))
         for function in functions:
-            name = f"{source.stem}.{function[1]}"
+            name = f"{namespace}.{function[1]}"
             if name in NON_ENDPOINTS:
                 continue
             following = re.compile(r"\bfn\s+\w+").search(code, function.end())
@@ -147,6 +149,13 @@ def validate(root, operations, rows):
         require(actual[row["wrapper"]] == expected, f"Rust route differs: {row['wrapper']}")
         require(row["contract"] in {"partial", "unreviewed"}, "Complete contracts require an explicit audit mechanism")
         require(bool(row["notes"]), f"Missing limitations: {row['wrapper']}")
+        if evidence := row.get("live_evidence"):
+            require(evidence["outcome"] in {"success", "rejection"}, f"Invalid live outcome: {row['wrapper']}")
+            file, scenario = evidence["test"].split(":", 1)
+            require(file in LIVE_TESTS, f"Not a live suite: {file}")
+            source = (root / "tests" / file).read_text()
+            require(re.search(rf"\basync fn {re.escape(scenario)}\(", source), f"Missing live scenario: {evidence['test']}")
+            require(row["wrapper"] in called(root, names, live=True), f"No live call for evidence: {row['wrapper']}")
 
 
 AREAS = ["Detection engine", "Exceptions", "Cases", "Fleet", "Spaces", "Roles", "Status", "Other APIs"]
@@ -170,15 +179,19 @@ def report(root, metadata, operations, rows):
     lines += [
         f"| **Total** | **{len(operations)}** | **{len(rows)}** | **{len(operations) - len(rows)}** |", "",
         "- Every named builder has an offline test asserting its method, path, query and body.",
-        "- **Live** marks builders called by the live test suites, which run against real Kibana deployments in CI.",
+        "- **Live** is `success` or `rejection` when a linked scenario's outcome has been reviewed; `called` records call presence only. These labels describe tests, not a fresh passing run.",
         "- **Contract** is `partial` when a known request or response option is not modeled and `unreviewed` when the full contract has not been audited.",
+        "- The [supported workflow review](supported-contracts.md) records the checked subsets, version differences and limits. The separate [schema drift check](schema-drift.md) compares pinned contracts and validates retained fixtures.",
         f"- The published total includes {sum(bool(op.get('deprecated')) for op in operations.values())} deprecated operations and some internal or placeholder routes.", "",
         "| Builder | Operation ID | Route | Contract | Live | Limits |",
         "| --- | --- | --- | --- | --- | --- |",
     ]
     for row in sorted(rows, key=lambda r: r["wrapper"]):
         notes = row["notes"].replace("|", "\\|")
-        mark = "yes" if row["wrapper"] in live else "-"
+        mark = "called" if row["wrapper"] in live else "-"
+        if evidence := row.get("live_evidence"):
+            file, scenario = evidence["test"].split(":", 1)
+            mark = f"[{evidence['outcome']}](../tests/{file} \"{scenario}\")"
         lines.append(f"| `{row['wrapper']}` | `{row['operation_id']}` | `{row['method']} {row['path']}` | {row['contract']} | {mark} | {notes} |")
     return "\n".join(lines) + "\n"
 

@@ -5,7 +5,8 @@ use kibana_rs::{
     Kibana, Result,
     cases::{CaseComment, CasePatch, CaseStatus, NewCase},
     exceptions::{
-        Entry, ItemSelector, ListSelector, NamespaceType, NewItem, NewList, Operator, OsType,
+        Comment, Entry, ItemSelector, ListSelector, NamespaceType, NewItem, NewList, Operator,
+        OsType,
     },
     fleet::{NewAgentPolicy, NewPackagePolicy, PackageRef},
     http::{Certificate, Credentials, TransportBuilder, Url},
@@ -81,24 +82,26 @@ async fn exception_lists_items_roundtrip_conflicts_and_spaces() {
             404
         );
 
-        let renamed =
-            NewList::detection("Approved scanners", "Owned exception fixture").list_id(&list_id);
-        let revision = list.revision.as_deref().expect("list concurrency token");
+        let tagged = exceptions
+            .update_list(&list.edit().tags(["network"]))
+            .send()
+            .await?
+            .json()
+            .await?;
+        let renamed = tagged.edit().name("Approved scanners");
         let updated = exceptions
-            .update_list(&list.id, revision, &renamed)
+            .update_list(&renamed)
             .send()
             .await?
             .json()
             .await?;
         assert_eq!(updated.name, "Approved scanners");
+        assert_eq!(updated.tags, ["network"], "edits keep unchanged fields");
+        assert_eq!(updated.description, "Owned exception fixture");
         assert_eq!(
-            status(
-                exceptions
-                    .update_list(&list.id, revision, &renamed)
-                    .send()
-                    .await
-            ),
-            409
+            status(exceptions.update_list(&renamed).send().await),
+            409,
+            "a stale edit conflicts"
         );
 
         let item_id = format!("scanner-item-{}", uuid::Uuid::new_v4());
@@ -111,6 +114,9 @@ async fn exception_lists_items_roundtrip_conflicts_and_spaces() {
             .create_item(
                 &NewItem::new(&list, "Scanner host", entries.clone())
                     .item_id(&item_id)
+                    .description("Known scanner")
+                    .tags(["network"])
+                    .comments(vec![Comment::new("Approved by SOC")])
                     .os_types(vec![OsType::Linux]),
             )
             .send()
@@ -136,26 +142,43 @@ async fn exception_lists_items_roundtrip_conflicts_and_spaces() {
             ),
             404
         );
-        let renamed = NewItem::new(&list, "Renamed scanner", entries)
-            .item_id(&item_id)
-            .os_types(vec![OsType::Linux]);
-        let revision = item.revision.as_deref().expect("item concurrency token");
+        let renamed = item.edit().name("Renamed scanner");
         let updated = exceptions
-            .update_item(&item.id, revision, &renamed)
+            .update_item(&renamed)
             .send()
             .await?
             .json()
             .await?;
         assert_eq!(updated.name, "Renamed scanner");
         assert_eq!(
-            status(
-                exceptions
-                    .update_item(&item.id, revision, &renamed)
-                    .send()
-                    .await
-            ),
-            409
+            updated.description, "Known scanner",
+            "edits keep unchanged fields"
         );
+        assert_eq!(updated.tags, ["network"]);
+        assert_eq!(updated.os_types, [OsType::Linux]);
+        assert_eq!(updated.entries, item.entries);
+        assert_eq!(
+            updated.comments.len(),
+            1,
+            "existing comments are not repeated"
+        );
+        assert_eq!(
+            status(exceptions.update_item(&renamed).send().await),
+            409,
+            "a stale edit conflicts"
+        );
+        let commented = exceptions
+            .update_item(&updated.edit().add_comment("Re-reviewed"))
+            .send()
+            .await?
+            .json()
+            .await?;
+        let comments: Vec<_> = commented
+            .comments
+            .iter()
+            .map(|c| c.comment.as_str())
+            .collect();
+        assert_eq!(comments, ["Approved by SOC", "Re-reviewed"]);
 
         let second = exceptions
             .create_item(&NewItem::new(
@@ -389,7 +412,7 @@ async fn fleet_enrollment_key_lifecycle_and_pagination() {
                 .await?
                 .item;
             assert!(key.active);
-            assert!(!key.api_key.is_empty());
+            assert!(!key.api_key.is_empty(), "enrollment API key is empty");
             assert!(key.expire_at.is_some());
             assert!(!format!("{key:?}").contains(&key.api_key));
             let fetched = fleet
@@ -447,6 +470,8 @@ async fn fleet_enrollment_key_lifecycle_and_pagination() {
 #[tokio::test]
 #[ignore = "requires a dedicated live Kibana deployment"]
 async fn detection_rules_crud_export_import_and_space_isolation() {
+    use serde_json::{Value, json};
+
     let root = client();
     let (space_id, client) = space(&root).await;
     let result: Result<()> = async {
@@ -517,6 +542,47 @@ async fn detection_rules_crud_export_import_and_space_isolation() {
             .await?;
         assert!(!duplicate.success);
         assert!(!duplicate.errors.is_empty());
+
+        let fresh_id = format!("krs-import-{}", uuid::Uuid::new_v4());
+        let mut fresh: Value = String::from_utf8_lossy(&bytes)
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|value| value["rule_id"] == rule.rule_id)
+            .unwrap();
+        fresh["rule_id"] = json!(fresh_id);
+        fresh.as_object_mut().unwrap().remove("id");
+        let mut mixed = format!("{fresh}\n").into_bytes();
+        mixed.extend_from_slice(&bytes);
+        let partial = security
+            .import_rules(mixed)
+            .overwrite(false)
+            .send()
+            .await?
+            .json()
+            .await?;
+        assert!(!partial.success, "{partial:?}");
+        assert_eq!(partial.success_count, 1, "{partial:?}");
+        assert_eq!(partial.errors.len(), 1, "{partial:?}");
+        assert_eq!(
+            partial.errors[0].rule_id.as_deref(),
+            Some(rule.rule_id.as_str())
+        );
+        assert_eq!(partial.errors[0].error.status_code, 409);
+        assert_eq!(
+            security
+                .get_rule(RuleSelector::RuleId(&fresh_id))
+                .send()
+                .await?
+                .json()
+                .await?
+                .rule_id,
+            fresh_id
+        );
+        security
+            .delete_rule(RuleSelector::RuleId(&fresh_id))
+            .send()
+            .await?;
+
         security
             .delete_rule(RuleSelector::Id(&rule.id))
             .send()
@@ -559,9 +625,15 @@ async fn security_cases_comments_and_version_conflicts() {
             .await?;
         assert_eq!(case.owner, "securitySolution");
         assert_eq!(cases.find().send().await?.json().await?.total, 1);
-        let change = || CasePatch::new(&case.id, &case.version).status(CaseStatus::InProgress);
+        let change = || {
+            CasePatch::new(&case.id, &case.version)
+                .status(CaseStatus::InProgress)
+                .field("category", "Authentication")
+                .unwrap()
+        };
         let changed = cases.update([change()]).send().await?.json().await?;
         assert_eq!(changed[0].status, "in-progress");
+        assert_eq!(changed[0].extra["category"], "Authentication");
         assert_eq!(status(cases.update([change()]).send().await), 409);
         let commented = cases
             .add_comment(
@@ -597,6 +669,8 @@ async fn security_cases_comments_and_version_conflicts() {
 #[tokio::test]
 #[ignore = "requires a dedicated live Kibana deployment and Elastic package registry access"]
 async fn fleet_policy_and_integration_lifecycle() {
+    use serde_json::{Value, json};
+
     let root = client();
     let (space_id, client) = space(&root).await;
     let result: Result<()> = async {
@@ -604,7 +678,9 @@ async fn fleet_policy_and_integration_lifecycle() {
         let setup = fleet.setup().send().await?.json().await?;
         assert_eq!(setup["isInitialized"], true);
         let request = NewAgentPolicy::new("Test SOC endpoints", "default")
-            .monitoring_enabled(Vec::<String>::new());
+            .description("Retain policy settings when renamed")
+            .inactivity_timeout(3600)
+            .monitoring_enabled(["logs"]);
         let policy = fleet
             .create_agent_policy(&request)
             .send()
@@ -612,27 +688,75 @@ async fn fleet_policy_and_integration_lifecycle() {
             .json()
             .await?
             .item;
-        assert_eq!(
-            fleet
-                .get_agent_policy(&policy.id)
-                .send()
-                .await?
-                .json()
-                .await?
-                .item
-                .name,
-            "Test SOC endpoints"
-        );
-        let renamed = NewAgentPolicy::new("Updated SOC endpoints", "default")
-            .monitoring_enabled(Vec::<String>::new());
+        let fetched = fleet
+            .get_agent_policy(&policy.id)
+            .send()
+            .await?
+            .json()
+            .await?
+            .item;
+        assert_eq!(fetched.name, "Test SOC endpoints");
+        let renamed = fetched.edit()?.name("Updated SOC endpoints");
         let updated = fleet
-            .update_agent_policy(&policy.id, &renamed)
+            .edit_agent_policy(&renamed)
             .send()
             .await?
             .json()
             .await?
             .item;
         assert_eq!(updated.name, "Updated SOC endpoints");
+        assert_eq!(updated.description, fetched.description);
+        assert_eq!(updated.extra["inactivity_timeout"], 3600);
+        assert_eq!(updated.extra["monitoring_enabled"], json!(["logs"]));
+        let matching_id = json!({
+            "id": updated.id,
+            "name": updated.name,
+            "namespace": updated.namespace,
+            "inactivity_timeout": updated.extra["inactivity_timeout"],
+        });
+        let updated = fleet
+            .update_agent_policy(&updated.id, &matching_id)
+            .send()
+            .await?
+            .json()
+            .await?
+            .item;
+        assert_eq!(updated.id, fetched.id);
+        assert_eq!(updated.name, "Updated SOC endpoints");
+        let outputs = fleet.list_outputs().send().await?.json().await?;
+        let default_output = outputs["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|output| output["is_default"] == true)
+            .unwrap()["id"]
+            .as_str()
+            .unwrap();
+        let select_output = updated.edit()?.data_output_id(default_output);
+        let rejected = fleet
+            .edit_agent_policy(&select_output)
+            .send()
+            .await
+            .unwrap_err();
+        assert_eq!(rejected.status().unwrap().as_u16(), 400);
+        assert!(
+            rejected
+                .message()
+                .is_some_and(|message| message.contains("platinum"))
+        );
+        let clear_output = updated.edit()?.clear_data_output_id();
+        fleet.edit_agent_policy(&clear_output).send().await?;
+        let cleared = fleet
+            .get_agent_policy(&policy.id)
+            .send()
+            .await?
+            .json()
+            .await?
+            .item;
+        assert_eq!(cleared.extra.get("data_output_id"), Some(&Value::Null));
+        assert_eq!(cleared.description, fetched.description);
+        assert_eq!(cleared.extra["inactivity_timeout"], 3600);
+        assert_eq!(cleared.extra["monitoring_enabled"], json!(["logs"]));
         assert!(
             fleet
                 .find_agent_policies()
@@ -700,10 +824,41 @@ async fn fleet_policy_and_integration_lifecycle() {
         let listed = populated.items.iter().find(|p| p.id == policy.id).unwrap();
         assert_eq!(listed.package_policies.len(), 1);
         assert_eq!(listed.agents, Some(0));
+        let replaced = integration("Updated integration test");
         fleet
-            .update_package_policy(&attached.id, &integration("Updated integration test"))
+            .update_package_policy(replaced.replacing(&attached.id))
             .send()
             .await?;
+        let current = fleet
+            .get_package_policy(&attached.id)
+            .send()
+            .await?
+            .json()
+            .await?
+            .item;
+        let renamed = format!("krs-system-edited-{space_id}");
+        let edited = fleet
+            .update_package_policy(
+                &current
+                    .edit()
+                    .name(&renamed)
+                    .description("Edited integration test"),
+            )
+            .send()
+            .await?
+            .json()
+            .await?
+            .item;
+        assert_eq!(
+            edited.description.as_deref(),
+            Some("Edited integration test")
+        );
+        assert_eq!(edited.name, renamed);
+        assert_eq!(
+            edited.inputs.as_array().map(Vec::len),
+            current.inputs.as_array().map(Vec::len),
+            "a full-format edit keeps the inputs"
+        );
         assert_eq!(
             fleet
                 .get_package_policy(&attached.id)

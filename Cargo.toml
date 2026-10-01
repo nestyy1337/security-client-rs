@@ -7,37 +7,73 @@ description = "Async Kibana client for security operations and Fleet management"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/nestyy1337/security-client-rs"
 readme = "README.md"
+documentation = "https://docs.rs/kibana-rs"
 keywords = ["kibana", "elastic", "siem", "security", "fleet"]
 categories = ["api-bindings", "web-programming::http-client"]
-include = ["/src/**/*.rs", "/examples/**/*.rs", "/tests/*.rs", "/tests/common/*.rs", "/README.md", "/CHANGELOG.md", "/LICENSE-APACHE", "/LICENSE-MIT"]
+include = ["/src/**/*.rs", "/examples/**/*.rs", "/tests/*.rs", "/tests/common/*.rs", "/tests/fixtures/*.json", "/docs/*.md", "/README.md", "/CHANGELOG.md", "/LICENSE-APACHE", "/LICENSE-MIT"]
+
+[package.metadata.docs.rs]
+all-features = true
 
 [features]
 default = []
 # Debug events per request; see the README.
 tracing = ["dep:tracing"]
 
-[workspace]
-members = ["demo"]
+[lints.clippy]
+correctness = { level = "deny", priority = -1 }
+suspicious = { level = "deny", priority = -1 }
+style = { level = "deny", priority = -1 }
+complexity = { level = "deny", priority = -1 }
+perf = { level = "deny", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+result_large_err = "allow"
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+wildcard_imports = "allow"
+too_many_lines = "allow"
+struct_excessive_bools = "allow"
+cast_possible_truncation = "allow"
+cast_sign_loss = "allow"
+cast_precision_loss = "allow"
+cast_possible_wrap = "allow"
+implicit_hasher = "allow"
+return_self_not_must_use = "allow"
+doc_markdown = "allow"
+unnecessary_wraps = "allow"
+unused_async = "allow"
+similar_names = "allow"
+
+[lints.rust]
+unused_imports = "warn"
+dead_code = "warn"
 
 [dependencies]
 base64 = "0.22"
-bytes = "1"
-futures-util = "0.3"
-http = "1"
-percent-encoding = "2"
+bytes = "1.7.1"
+futures-util = "0.3.28"
+http = "1.1"
+percent-encoding = "2.3"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "multipart", "stream"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-serde_urlencoded = "0.7"
-thiserror = "2"
-tokio = { version = "1", features = ["time"] }
-tracing = { version = "0.1", default-features = false, features = ["std"], optional = true }
-url = "2"
+serde = { version = "1.0.103", features = ["derive"] }
+serde_json = "1.0.29"
+serde_urlencoded = "0.7.1"
+thiserror = "2.0.3"
+tokio = { version = "1.28.1", features = ["time"] }
+tracing = { version = "0.1.37", default-features = false, features = ["std"], optional = true }
+url = "2.4"
+
+# Raises lower bounds that dependencies under-specify, for the minimal-versions CI job.
+# `cfg(any())` never matches, so these never build.
+[target.'cfg(any())'.dependencies]
+quinn = { version = "0.11.6", optional = true }
 
 [dev-dependencies]
 axum = "0.8"
 reqwest = { version = "0.13", default-features = false, features = ["rustls", "json"] }
-serde_json = "1"
-tracing-subscriber = { version = "0.3", default-features = false, features = ["fmt", "std"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "time", "fs", "io-util"] }
+serde_json = "1.0.29"
+tracing-subscriber = { version = "0.3.19", default-features = false, features = ["fmt", "std"] }
+tokio = { version = "1.28.1", features = ["macros", "rt-multi-thread", "net", "time", "fs", "io-util", "test-util"] }
 uuid = { version = "1", features = ["v4"] }

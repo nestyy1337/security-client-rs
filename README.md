@@ -2,7 +2,11 @@
 
 An async Rust client for the Kibana HTTP API, focused on security operations: detection rules, exception lists, cases, Fleet, spaces and roles.
 
-The project is pre-release and not yet published on crates.io. It is not affiliated with or supported by Elastic.
+The project is pre-1.0. It is not affiliated with or supported by Elastic.
+
+The [working notes](notes/work-in-progress.md) describe current work and rough
+edges. [Ideas and TODOs](notes/ideas-and-todos.md) are a working list, with room
+for proposals that still need a reason to implement them.
 
 ## Coverage
 
@@ -25,7 +29,7 @@ Routes without a named builder are reachable through `Kibana::request`.
 
 ```toml
 [dependencies]
-kibana-rs = { git = "https://github.com/nestyy1337/security-client-rs" }
+kibana-rs = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
@@ -56,48 +60,104 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-More examples are in [examples/](examples/).
+For the next step, these examples cover complete workflows:
+
+| Task | Example |
+| --- | --- |
+| List detection rules and agent policies | [security.rs](examples/security.rs) |
+| Read collections across pages | [pagination.rs](examples/pagination.rs) |
+| Export and import, including partial failures | [transfer.rs](examples/transfer.rs) |
+| Retry reads and reconcile uncertain writes | [recovery.rs](examples/recovery.rs) |
+
+The API reference has the details of selectors, edits and response types. Build
+it locally with `cargo doc --no-deps --all-features --open`.
 
 ## How the client works
 
 - `http::Transport` holds the connection pool, credentials, default headers, timeouts, trusted roots, proxy and response size limit. `Transport::cloud` connects with an Elastic Cloud ID.
 - Namespace methods on `Kibana` return one builder per endpoint. Required parameters are arguments; optional ones are setters. Every builder also has `header()` and `request_timeout()`.
 - `send()` returns `Response<T>`, and `json()` decodes into the endpoint's type. `text()`, `bytes()`, `bytes_stream()` and `json_as::<U>()` are always available. Exports and downloads return `Response<Raw>`.
-- Create and replace endpoints accept any `Serialize` body, so rule types and fields without a typed builder can be sent as JSON.
+- Create endpoints accept any `Serialize` body, so rule types and fields without a typed builder can be sent as JSON. A body whose extension map repeats a modeled field, such as `id`, is rejected rather than sent with two identities.
+- Existing exception lists and items are changed through `list.edit()` and `item.edit()`, which start from the retrieved state and bind its ID, namespace and concurrency token. Comments are append-only: `add_comment` sends only the new comment. Retrieved lists and items can be passed to `get_*`, `delete_*` and `find_items`, which then use their namespace.
+- Package policies are edited in Fleet's full format with `policy.edit()`, which keeps the editable inputs and requires a concurrency token, or replaced with a simplified definition through `NewPackagePolicy::replacing`. Creation and simplified replacement responses must be fetched with `get_package_policy` before editing.
+- Agent policies use `policy.edit()?` and `fleet.edit_agent_policy(&edit)` to retain their inactivity timeout and change selected settings. `data_output_id(id)` selects an output; `clear_data_output_id()` sends null to restore Fleet's default. Unset optional fields keep their server values. Agent-policy updates have no concurrency check.
+- Headers are combined once per request: built-in defaults and credentials, transport headers, the body's `Content-Type`, then per-request headers. Each stage replaces every earlier value of a name it sets.
+
+Case updates accept extra fields through `CasePatch::field`, which rejects `id`
+and `version` so the patch keeps its resource identity and concurrency token.
+Checked rule patch fields also reserve selectors. Space updates require a body
+`id` matching the URL; generic agent-policy updates allow `id` to be omitted,
+but reject a conflicting or non-string value before HTTP.
+Extension fields must be supported by the target Kibana version.
+
+Every named builder has `into_request()` to preserve its route, scope and settings
+while adding options through the raw request interface. Replacing the raw body
+with `Request::json` or `Request::body` does not reapply the builder's identity
+or concurrency checks. Earlier construction errors still fail at `send`.
+`Request::query` appends parameters; avoid adding a second value for an existing
+selector or other single-valued option. `unchecked_field` and raw replacements
+leave these guarantees to the caller.
 
 ## Behavior to know
 
 - Requests are never retried and redirects are never followed.
 - `Kibana::space` scopes space-aware routes to `/s/{space}`. Space, role and status routes are always global.
-- `find_*` methods return one page and a total. `pages()` and `items()` stream the whole collection, one request per page. Kibana pages by offset, so concurrent changes can skip or repeat items, and most collections stop at 10,000 results.
+- `find_*` methods return one page and a total. `pages()` and `items()` stream the whole collection, one request per page, and fail with `Error::UnexpectedPage` if Kibana returns a different page than requested. `bounded_pages(n)` and `bounded_items(n)` read at most `n` pages and end with `Error::PageLimit` when more remain. Kibana pages by offset, so concurrent changes can skip or repeat items, and most collections stop at 10,000 results.
+- Detection rule schedules use `RuleSchedule`, which derives the lookback (`from`) from the interval so consecutive runs cannot leave gaps. `custom_schedule` sets raw date math.
 - Cases and exception lists use optimistic concurrency. Pass the latest `version` or `_version`; stale values fail with HTTP 409.
-- Rule and exception imports report per-object failures inside an HTTP 200 response.
+- Rule and exception imports report typed per-object failures inside an HTTP 200 response. Rule-import `success` covers rules only; check `exceptions_success`, `action_connectors_success` and their error arrays separately.
 - Fleet wraps single resources as `{"item": ...}`, so those endpoints decode into `Item<T>`. Fleet collections count pages from 1; action status counts from 0.
-- Fleet agent actions are asynchronous. `Fleet::wait_for_action`, `wait_for_upload` and `wait_for_agent_policy` poll until a deadline and return the last state seen if it passes. A finished action can still report failed agents.
+- Fleet agent actions are asynchronous. `Fleet::wait_for_action`, `wait_for_upload` and `wait_for_agent_policy` enforce an overall deadline, including requests and body reads, and retain the last observed state on timeout. Zero timeout sends no request. A resource that disappears after being seen ends the wait as `WaitOutcome::Vanished`. Action states Kibana adds later are kept as `Unknown` and end the wait for inspection. A finished action can still report failed agents. Action lookup searches up to 10,000 recent action documents; older actions may remain outside that window.
 
 ## Error handling and recovery
 
-Non-success responses become `Error::Api` with the status, headers and up to 16 KiB of body. `Error::message()` returns Kibana's message and `Error::retry_after()` the `Retry-After` delay. Bodies may contain operational data and are never printed by `Display` or `Debug`.
+Non-success responses become `Error::Api` with the status, headers and up to 16 KiB of body. `Error::message()` returns Kibana's message and `Error::retry_after()` the `Retry-After` delay. When a successful response's body is interrupted or exceeds the limit, `Error::Body` and `Error::ResponseTooLarge` keep its status and headers, available through `Error::status()` and `Error::headers()`.
+
+`bytes_stream()` has no buffered response size limit. Its failures also return
+`Error::Body`, retaining status, headers and the count of bytes delivered before
+the failure.
+
+Bodies, query values and Fleet policy variables can contain operational data or
+credentials and are omitted from diagnostic output. `Error::Decode` reports the
+JSON error category, line and column through `DecodeError`, including in its
+source chain. `DecodeError::as_serde_error()` deliberately exposes the original
+Serde message, which can quote response values.
 
 The client does not retry, because whether a retry is safe depends on the request:
 
 - Reads can be retried on 429, 502, 503 and transport failures, honoring `Retry-After`, with backoff and an overall deadline.
-- A mutation interrupted by a timeout or dropped connection may or may not have been applied. Read the resource back by a stable identifier, such as a rule's `rule_id` or a list's `list_id`, before trying again.
+- A mutation interrupted by a timeout or dropped connection, including while its response body is read, may or may not have been applied. Read the resource back by a stable identifier, such as a rule's `rule_id` or a list's `list_id`, before trying again. A successful status on `Error::Body`, `Error::Decode` or `Error::ResponseTooLarge` shows Kibana answered successfully, not what it did. Read-back can also exceed the configured size limit; recovery does not raise it automatically.
 - On HTTP 409, read the resource again to get its current version and reapply the change.
 
 [examples/recovery.rs](examples/recovery.rs) implements these patterns. [examples/pagination.rs](examples/pagination.rs) and [examples/transfer.rs](examples/transfer.rs) show collection streams and export and import with partial failures.
 
 ## Tracing
 
-The optional `tracing` feature emits one debug event per request under the `kibana_rs` target, with the endpoint name, method, path, status, duration and any `X-Opaque-Id` header, plus an event when a response does not match the expected type. Query values, bodies, credentials and other headers are never recorded.
+The optional `tracing` feature emits debug events under the `kibana_rs` target with the endpoint name, method, path, status, duration and any `X-Opaque-Id` header. A request emits one event when successful response headers arrive or when it fails, and reading a successful body with `bytes`, `text` or `json` emits a second event when the body is complete, interrupted or too large. Streamed or unread bodies emit no body event. A response that does not match the expected type is also reported. Query values, bodies, credentials and other headers are never recorded.
 
 ```toml
-kibana-rs = { git = "https://github.com/nestyy1337/security-client-rs", features = ["tracing"] }
+kibana-rs = { version = "0.1", features = ["tracing"] }
 ```
 
 ## Compatibility
 
-Tested against self-managed Kibana 9.5 and 9.4 with a Basic license. 8.x, Serverless, Elastic Cloud and paid features are not tested. The declared minimum Rust version is 1.88.
+The initial supported targets are self-managed Kibana 9.5.4 and 9.4.7 with a Basic
+license on Linux x86_64. Each release must pass both pinned deployment profiles.
+Other patches within those minor versions are expected to be similar but are
+not certified by those runs. 8.x, Serverless, Elastic Cloud, paid features and
+stack upgrades are outside the tested scope. The minimum Rust version is 1.88.
+
+The [supported workflow review](docs/supported-contracts.md) records the checked
+request and response subsets and their remaining limits. New Kibana versions
+enter the support list only after their contracts are reviewed and a deployment
+profile passes. Removing a supported minor or raising the Rust minimum requires
+a new minor crate version and a changelog entry. Patch releases keep the documented
+Rust interface compatible; before 1.0, minor releases may change it.
+
+Use a dedicated service identity for detection-rule automation. Rule creation
+and updates capture the caller's privileges for execution, so credential rotation
+and privilege changes also need rule-level verification. See
+[Elastic's detection API authentication notes](https://www.elastic.co/docs/api/doc/kibana/group/endpoint-security-detections-api).
 
 ## Development
 
@@ -107,7 +167,17 @@ cargo test --workspace --all-targets --all-features
 
 Offline tests check every builder's method, path, query and body against a recording mock server. Live tests run against disposable Elastic Stack deployments; see [tests/deployment](tests/deployment/README.md). The [coverage report](docs/api-coverage.md) is generated and checked by `tools/api_coverage.py`; see [coverage](coverage/README.md).
 
+The [schema drift report](docs/schema-drift.md) compares parameters, request bodies
+and response schemas across the checksum-pinned supported versions. CI checks the
+comparison and validates retained JSON fixtures, which also exercise typed Rust
+builders and response decoding. These fixtures cover selected workflows.
+
 A Nix flake provides the toolchain for those who use it.
+Prefix development commands with `nix develop -c` when using that environment.
+
+[Release steps](docs/releasing.md) cover package verification, version tags and
+publication. Before registry publication, use a Git dependency pinned with `rev`
+to the reviewed commit.
 
 ## License
 

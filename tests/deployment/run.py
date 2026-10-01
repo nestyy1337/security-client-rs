@@ -366,7 +366,7 @@ def main():
             "source_commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
             "source_dirty": bool(subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT)),
             "fixture_sha256": sha256_files([p for p in HERE.rglob("*") if p.is_file() and "__pycache__" not in p.parts]),
-            "client_test_sha256": sha256_files([*ROOT.glob("src/*.rs"), *ROOT.glob("tests/*.rs"), ROOT / "Cargo.toml", ROOT / "Cargo.lock"]),
+            "client_test_sha256": sha256_files([*ROOT.joinpath("src").rglob("*.rs"), *ROOT.joinpath("tests").rglob("*.rs"), ROOT / "Cargo.toml", ROOT / "Cargo.lock"]),
             "api_snapshot_sha256": json.loads((ROOT / "coverage/upstream.json").read_text())["sha256"],
             "started_at": datetime.now(timezone.utc).isoformat(),
         })

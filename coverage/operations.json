@@ -6,7 +6,11 @@
     "operation_id": "addCaseCommentDefaultSpace",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Typed free-text comments; alert and other attachments only as caller-supplied JSON. Returns the updated case."
+    "notes": "Typed free-text comments; alert and other attachments only as caller-supplied JSON. Returns the updated case.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:security_cases_comments_and_version_conflicts"
+    }
   },
   {
     "wrapper": "cases.create",
@@ -15,7 +19,11 @@
     "operation_id": "createCaseDefaultSpace",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Typed severity, tags, connector and syncAlerts; assignees, category and custom fields only as caller-supplied JSON."
+    "notes": "Typed severity, tags, connector and syncAlerts; assignees, category and custom fields only as caller-supplied JSON.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:security_cases_comments_and_version_conflicts"
+    }
   },
   {
     "wrapper": "cases.delete",
@@ -24,7 +32,11 @@
     "operation_id": "deleteCaseDefaultSpace",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "ID-list deletion; no full contract audit."
+    "notes": "ID-list deletion; no full contract audit.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:security_cases_comments_and_version_conflicts"
+    }
   },
   {
     "wrapper": "cases.find",
@@ -33,7 +45,11 @@
     "operation_id": "findCasesDefaultSpace",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Page, page size, owners, search, status, severity, tags and sorting; no assignee, reporter, category or date-range filters."
+    "notes": "Page, page size, owners, search, status, severity, tags and sorting; no assignee, reporter, category or date-range filters.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:security_cases_comments_and_version_conflicts"
+    }
   },
   {
     "wrapper": "cases.find_comments",
@@ -42,7 +58,11 @@
     "operation_id": "findCaseCommentsDefaultSpace",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Page, page size and sort order; comments remain JSON."
+    "notes": "Page, page size and sort order; comments remain JSON.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:security_cases_comments_and_version_conflicts"
+    }
   },
   {
     "wrapper": "cases.get",
@@ -51,7 +71,11 @@
     "operation_id": "getCaseDefaultSpace",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "Core case fields and extensible JSON response."
+    "notes": "Core case fields and extensible JSON response.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:security_cases_comments_and_version_conflicts"
+    }
   },
   {
     "wrapper": "cases.update",
@@ -60,7 +84,11 @@
     "operation_id": "updateCaseDefaultSpace",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Versioned status, title, description, severity and tag patches; other fields not modeled."
+    "notes": "Versioned updates with typed common fields and CasePatch::field for extra settings; id and version cannot be replaced by extra fields.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:security_cases_comments_and_version_conflicts"
+    }
   },
   {
     "wrapper": "client.status",
@@ -78,7 +106,11 @@
     "operation_id": "CreateExceptionListItem",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Typed match, match_any, exists, wildcard, value-list reference and nested entries, plus OS types; Endpoint artifact validation deferred."
+    "notes": "Typed match, match_any, exists, wildcard, value-list reference and nested entries, plus OS types; Endpoint artifact validation deferred.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.create_list",
@@ -87,7 +119,11 @@
     "operation_id": "CreateExceptionList",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Detection list fields, OS types and user-defined version; Endpoint artifact constraints not validated by the client."
+    "notes": "Detection list fields, OS types and user-defined version; Endpoint artifact constraints not validated by the client.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.delete_item",
@@ -96,7 +132,11 @@
     "operation_id": "DeleteExceptionListItem",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "Core fields and extensible response; full contract parity not audited."
+    "notes": "Core fields and extensible response; full contract parity not audited.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.delete_list",
@@ -105,7 +145,11 @@
     "operation_id": "DeleteExceptionList",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "Core fields and extensible response; full contract parity not audited."
+    "notes": "Core fields and extensible response; full contract parity not audited.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.duplicate_list",
@@ -114,7 +158,11 @@
     "operation_id": "DuplicateExceptionList",
     "scope": "Space",
     "contract": "partial",
-    "notes": "List ID, namespace and expired-item selection; response retains extra fields."
+    "notes": "List ID, namespace and expired-item selection; response retains extra fields.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.export_list",
@@ -123,7 +171,11 @@
     "operation_id": "ExportExceptionList",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Streaming NDJSON with namespace and expired-item selection. Value-list contents excluded."
+    "notes": "Streaming NDJSON with namespace and expired-item selection. Value-list contents excluded.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.find_items",
@@ -132,7 +184,11 @@
     "operation_id": "FindExceptionListItems",
     "scope": "Space",
     "contract": "partial",
-    "notes": "One list per call; pagination, filter, search and sorting, no multi-list option. Upstream scalar parsing does not support literal commas in list IDs/filters."
+    "notes": "One list per call; pagination, filter, search and sorting, no multi-list option. Upstream scalar parsing does not support literal commas in list IDs/filters.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.find_lists",
@@ -141,7 +197,11 @@
     "operation_id": "FindExceptionLists",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Namespace, explicit pagination, filter and sorting."
+    "notes": "Namespace, explicit pagination, filter and sorting.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.get_item",
@@ -150,7 +210,11 @@
     "operation_id": "ReadExceptionListItem",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "Core fields and extensible response; full contract parity not audited."
+    "notes": "Core fields and extensible response; full contract parity not audited.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.get_list",
@@ -159,7 +223,11 @@
     "operation_id": "ReadExceptionList",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "Core fields and extensible response; full contract parity not audited."
+    "notes": "Core fields and extensible response; full contract parity not audited.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.import_lists",
@@ -168,7 +236,11 @@
     "operation_id": "ImportExceptionList",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Multipart NDJSON with overwrite/as_new_list options; preserves HTTP-200 partial failures. Value-list contents excluded."
+    "notes": "Multipart NDJSON with overwrite/as_new_list options; preserves HTTP-200 partial failures. Value-list contents excluded.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.summary",
@@ -177,7 +249,11 @@
     "operation_id": "ReadExceptionListSummary",
     "scope": "Space",
     "contract": "partial",
-    "notes": "JSON OS summary with optional filter. Upstream can report total=0 when no items have os_types; use find_items().total for item counts."
+    "notes": "JSON OS summary with optional filter. Upstream can report total=0 when no items have os_types; use find_items().total for item counts.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.update_item",
@@ -186,7 +262,11 @@
     "operation_id": "UpdateExceptionListItem",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Explicit optimistic concurrency token; replaces modeled fields. Endpoint artifact validation deferred."
+    "notes": "Explicit optimistic concurrency token; replaces modeled fields. Endpoint artifact validation deferred.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "exceptions.update_list",
@@ -195,7 +275,11 @@
     "operation_id": "UpdateExceptionList",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Explicit optimistic concurrency token; replaces modeled fields, not a patch."
+    "notes": "Explicit optimistic concurrency token; replaces modeled fields, not a patch.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:exception_lists_items_roundtrip_conflicts_and_spaces"
+    }
   },
   {
     "wrapper": "fleet.agent_action_status",
@@ -204,7 +288,11 @@
     "operation_id": "get-fleet-agents-action-status",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Zero-based pagination; preserves failure counts, sampled errors and unknown status/type strings. Fleet::wait_for_action polls it."
+    "notes": "Zero-based page, page size, date/latest window and error size. Typed status, counters and extensible fields. Wait helper expands page zero through 10,000 action documents within its deadline.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "deployment.rs:fleet_agent_bulk_actions_and_diagnostics"
+    }
   },
   {
     "wrapper": "fleet.agent_status",
@@ -384,7 +472,11 @@
     "operation_id": "get-fleet-agents-agentid",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "Core fields plus extensible JSON."
+    "notes": "Core fields plus extensible JSON.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "deployment.rs:fleet_agent_bulk_actions_and_diagnostics"
+    }
   },
   {
     "wrapper": "fleet.get_agent_policy",
@@ -519,7 +611,7 @@
     "operation_id": "put-fleet-agent-policies-agentpolicyid",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Same typed policy settings as creation; other settings only as caller-supplied JSON."
+    "notes": "Retrieved edits bind the policy ID, retain inactivity timeout and support null output clearing; generic bodies reject a supplied ID that differs from the path. Other settings only as caller-supplied JSON. Selecting an output requires Platinum. No optimistic concurrency check."
   },
   {
     "wrapper": "fleet.update_package_policy",
@@ -537,7 +629,11 @@
     "operation_id": "post-fleet-agents-agentid-upgrade",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Typed request; JSON acknowledgment only. Container agents cannot be upgraded through Fleet."
+    "notes": "Typed request; the live scenario verifies container-agent upgrade rejection only. Successful upgrades remain unverified.",
+    "live_evidence": {
+      "outcome": "rejection",
+      "test": "deployment.rs:fleet_agent_bulk_actions_and_diagnostics"
+    }
   },
   {
     "wrapper": "roles.delete",
@@ -582,7 +678,11 @@
     "operation_id": "CreateAlertsIndex",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "Alert-index initialization only; not detection execution."
+    "notes": "Alert-index initialization only; not detection execution.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:detection_rules_crud_export_import_and_space_isolation"
+    }
   },
   {
     "wrapper": "security.create_rule",
@@ -591,7 +691,11 @@
     "operation_id": "CreateRule",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Typed KQL/Lucene query rules with exception-list associations; other rule types only as caller-supplied JSON."
+    "notes": "Typed KQL/Lucene query rules with exception-list associations; other rule types only as caller-supplied JSON.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:detection_rules_crud_export_import_and_space_isolation"
+    }
   },
   {
     "wrapper": "security.delete_rule",
@@ -600,7 +704,11 @@
     "operation_id": "DeleteRule",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "ID or rule_id lookup; complete deletion contract not audited."
+    "notes": "ID or rule_id lookup; complete deletion contract not audited.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:detection_rules_crud_export_import_and_space_isolation"
+    }
   },
   {
     "wrapper": "security.export_rules",
@@ -609,7 +717,11 @@
     "operation_id": "ExportRules",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Optional rule_id selection, exclude_export_details and file_name; raw NDJSON response."
+    "notes": "Optional rule_id selection, exclude_export_details and file_name; raw NDJSON response.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:detection_rules_crud_export_import_and_space_isolation"
+    }
   },
   {
     "wrapper": "security.find_rules",
@@ -618,7 +730,11 @@
     "operation_id": "FindRules",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Page, page size, filter and sorting; no field selection or gap filters."
+    "notes": "Page, page size, filter and sorting; no field selection or gap filters.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:detection_rules_crud_export_import_and_space_isolation"
+    }
   },
   {
     "wrapper": "security.get_rule",
@@ -627,7 +743,11 @@
     "operation_id": "ReadRule",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "ID or rule_id lookup; response has core fields and an extensible JSON map."
+    "notes": "ID or rule_id lookup; response has core fields and an extensible JSON map.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:detection_rules_crud_export_import_and_space_isolation"
+    }
   },
   {
     "wrapper": "security.import_rules",
@@ -636,7 +756,11 @@
     "operation_id": "ImportRules",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Multipart NDJSON with overwrite, exception, connector and new-list options; HTTP-200 partial failures retained."
+    "notes": "Multipart NDJSON with overwrite, exception, connector and new-list options; typed per-object errors and independent rule, exception and connector outcomes.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:detection_rules_crud_export_import_and_space_isolation"
+    }
   },
   {
     "wrapper": "security.patch_rule",
@@ -645,7 +769,11 @@
     "operation_id": "PatchRule",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Typed common fields and exception-list replacement; any other field through PatchRule::field."
+    "notes": "Typed common fields and exception-list replacement; any other field through PatchRule::field.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:detection_rules_crud_export_import_and_space_isolation"
+    }
   },
   {
     "wrapper": "security.privileges",
@@ -654,7 +782,11 @@
     "operation_id": "ReadPrivileges",
     "scope": "Space",
     "contract": "unreviewed",
-    "notes": "JSON privilege response."
+    "notes": "JSON privilege response.",
+    "live_evidence": {
+      "outcome": "success",
+      "test": "live.rs:detection_rules_crud_export_import_and_space_isolation"
+    }
   },
   {
     "wrapper": "spaces.create",
@@ -699,6 +831,6 @@
     "operation_id": "put-spaces-space-id",
     "scope": "Global",
     "contract": "partial",
-    "notes": "Same fields as creation; extensible fields are sent back unchanged."
+    "notes": "Same fields as creation; the required body ID must match the path before HTTP. Extensible fields are sent back unchanged."
   }
 ]

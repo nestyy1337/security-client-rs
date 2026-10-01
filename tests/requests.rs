@@ -6,15 +6,45 @@ use std::collections::BTreeMap;
 use common::Mock;
 use kibana_rs::{
     Error, Scope,
-    cases::CaseStatus,
+    cases::{CasePatch, CaseStatus},
     http::{Body, Method},
     security::{RuleSelector, Severity},
+    spaces::Space,
 };
 use serde_json::json;
 
 /// Maps with non-string keys cannot be represented as JSON objects.
 fn unserializable() -> BTreeMap<(u8, u8), u8> {
     BTreeMap::from([((1, 2), 3)])
+}
+
+#[tokio::test]
+async fn json_composition_preserves_floats_and_rejects_unsupported_integers() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    let fraction = 2.291_712_365_432_881e-9_f64;
+    mock.json(json!({}));
+    client
+        .request(Method::POST, Scope::Space, &["api", "x"])
+        .json(&BTreeMap::from([("fraction", fraction)]))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        mock.take().body,
+        serde_json::to_vec(&json!({"fraction": fraction})).unwrap()
+    );
+
+    for value in [u128::from(u64::MAX) + 2, u128::MAX] {
+        let error = client
+            .request(Method::POST, Scope::Space, &["api", "x"])
+            .json(&BTreeMap::from([("integer", value)]))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::Serialize(_)), "{error:?}");
+    }
+    assert_eq!(mock.request_count(), 0);
 }
 
 #[tokio::test]
@@ -41,6 +71,18 @@ async fn serialization_failures_are_reported_by_send_without_a_request() {
             .await
             .unwrap_err(),
         client
+            .spaces()
+            .update("soc", &unserializable())
+            .send()
+            .await
+            .unwrap_err(),
+        client
+            .fleet()
+            .update_agent_policy("p1", &unserializable())
+            .send()
+            .await
+            .unwrap_err(),
+        client
             .security()
             .patch_rule(RuleSelector::Id("r"))
             .field("threat", unserializable())
@@ -52,22 +94,179 @@ async fn serialization_failures_are_reported_by_send_without_a_request() {
         assert!(matches!(error, Error::Serialize(_)), "{error:?}");
     }
     assert_eq!(mock.request_count(), 0);
+    assert!(matches!(
+        CasePatch::new("a", "v1").field("customFields", unserializable()),
+        Err(Error::Serialize(_))
+    ));
 }
 
 #[tokio::test]
-async fn fields_cannot_be_merged_into_a_non_object_body() {
-    let mock = Mock::start().await;
-    let error = mock
-        .client()
-        .exceptions()
-        .update_list("id", "WzEsMV0=", &json!(["not", "an", "object"]))
+async fn named_builders_can_extend_a_request_without_rebuilding_it() {
+    use kibana_rs::http::headers::{HeaderName, HeaderValue};
+    use std::time::Duration;
+
+    let mock = Mock::start_at("/proxy").await;
+    let client = mock.soc();
+    mock.json(json!({}));
+    client
+        .security()
+        .patch_rule(RuleSelector::RuleId("r"))
+        .enabled(true)
+        .header(
+            HeaderName::from_static("x-opaque-id"),
+            HeaderValue::from_static("extended"),
+        )
+        .into_request()
+        .query(&[("refresh", "wait_for")])
+        .send()
+        .await
+        .unwrap();
+    let request = mock.take();
+    request
+        .route(
+            "PATCH",
+            "/proxy/s/soc/api/detection_engine/rules",
+            &[("refresh", "wait_for")],
+        )
+        .body(json!({"rule_id": "r", "enabled": true}));
+    assert_eq!(request.header("x-opaque-id"), Some("extended"));
+
+    mock.reply_after(Duration::from_secs(1));
+    let error = client
+        .status()
+        .request_timeout(Duration::from_millis(20))
+        .into_request()
         .send()
         .await
         .unwrap_err();
+    assert!(matches!(error, Error::Transport(e) if e.is_timeout()));
+    mock.take().route("GET", "/proxy/api/status", &[]);
+
+    let error = client
+        .cases()
+        .get("")
+        .into_request()
+        .send()
+        .await
+        .unwrap_err();
+    assert!(matches!(error, Error::InvalidRequest(_)));
+    assert_eq!(mock.request_count(), 0);
+}
+
+#[tokio::test]
+async fn extension_maps_cannot_override_modeled_identity() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    let mut space = Space::new("intended-space", "Intended");
+    space.extra.insert("color".into(), json!("#aabbcc"));
+    mock.json(json!({"id": "intended-space", "name": "Intended"}));
+    client.spaces().create(&space).send().await.unwrap();
+    mock.take().body(json!({
+        "id": "intended-space", "name": "Intended", "disabledFeatures": [], "color": "#aabbcc"
+    }));
+
+    space.extra.insert("id".into(), json!("other-space"));
+    let error = client.spaces().create(&space).send().await.unwrap_err();
     assert!(
         matches!(error, Error::InvalidRequest(ref message) if message.contains("\"id\"")),
         "{error:?}"
     );
+    assert!(matches!(Body::json(&space), Err(Error::InvalidRequest(_))));
+    let error = client
+        .spaces()
+        .update("intended-space", &space)
+        .send()
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(error, Error::InvalidRequest(ref message) if message.contains("repeats")),
+        "{error:?}"
+    );
+    assert_eq!(mock.request_count(), 0);
+}
+
+#[tokio::test]
+async fn identity_conflicts_survive_cloning_and_body_replacement() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let conflicting = json!({"id": "other", "name": "Other", "namespace": "default"});
+    let valid = json!({"id": "soc", "name": "SOC", "namespace": "default"});
+    for request in [
+        client.spaces().update("soc", &conflicting).into_request(),
+        client
+            .fleet()
+            .update_agent_policy("soc", &conflicting)
+            .into_request(),
+    ] {
+        for copy in [
+            request.clone(),
+            request.clone().json(&valid),
+            request.clone().body(Body::json(&valid).unwrap()),
+            request,
+        ] {
+            let error = copy.send().await.unwrap_err();
+            assert!(
+                matches!(error, Error::InvalidRequest(ref message)
+                    if message == "request body id must be a string matching the path id"),
+                "{error:?}"
+            );
+        }
+    }
+    assert_eq!(mock.request_count(), 0);
+}
+
+#[tokio::test]
+async fn raw_body_replacement_can_deliberately_change_identity() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let body = json!({"id": "other-rule", "enabled": false});
+    mock.json(json!({}));
+    client
+        .security()
+        .patch_rule(RuleSelector::Id("selected-rule"))
+        .enabled(true)
+        .into_request()
+        .json(&body)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("PATCH", "/s/soc/api/detection_engine/rules", &[])
+        .body(body);
+
+    let body = json!({"id": "other-space", "name": "Other"});
+    mock.json(json!({}));
+    client
+        .spaces()
+        .update("soc", &Space::new("soc", "SOC"))
+        .into_request()
+        .body(Body::json(&body).unwrap())
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("PUT", "/api/spaces/space/soc", &[])
+        .body(body);
+}
+
+#[tokio::test]
+async fn every_clone_of_a_failed_request_reports_the_same_error() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    let original = client
+        .request(Method::POST, Scope::Space, &["api", "x"])
+        .json(&unserializable());
+    let copies = [original.clone(), original.clone()];
+    for copy in copies {
+        let error = copy.send().await.unwrap_err();
+        assert!(matches!(error, Error::Serialize(_)), "{error:?}");
+        assert!(
+            std::error::Error::source(&error).is_some(),
+            "the source survives sharing"
+        );
+    }
+    let error = original.send().await.unwrap_err();
+    assert!(matches!(error, Error::Serialize(_)), "{error:?}");
     assert_eq!(mock.request_count(), 0);
 }
 

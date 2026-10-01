@@ -1,9 +1,14 @@
 //! Cases and their comments. Updates use optimistic concurrency through case versions.
+//!
+//! Create a [`NewCase`], then build [`CasePatch`] values with the IDs and versions
+//! from the latest read. The owner identifies the Kibana solution handling the
+//! case; comments must use the same owner. [`NewCase::security`] and
+//! [`SECURITY_OWNER`] select the Security solution.
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 use crate::{
-    Kibana, Scope, SortOrder,
+    Error, Kibana, Result, Scope, SortOrder,
     http::{Empty, Method},
     pagination::paginated,
     request::endpoint,
@@ -13,6 +18,7 @@ use crate::{
 /// The case owner used by the Security solution.
 pub const SECURITY_OWNER: &str = "securitySolution";
 
+/// A case returned by Kibana. Use its ID and current version to build a [`CasePatch`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Case {
@@ -117,6 +123,7 @@ impl NewCase {
 }
 
 /// Changes to one case. Only the fields set here are sent.
+/// Unset fields retain their server values; an empty tag list removes all tags.
 #[derive(Clone, Debug, Serialize)]
 pub struct CasePatch {
     id: String,
@@ -156,6 +163,30 @@ impl CasePatch {
             "tags",
             tags.into_iter().map(|t| Value::String(t.into())).collect(),
         )
+    }
+
+    /// Sets an additional patchable field. The case ID and concurrency version
+    /// are reserved; supply them through [`Self::new`].
+    ///
+    /// ```
+    /// use kibana_rs::{Error, cases::CasePatch};
+    /// use serde_json::{json, to_value};
+    ///
+    /// let patch = CasePatch::new("case-a", "version-1");
+    /// assert!(matches!(patch.clone().field("id", "case-b"), Err(Error::InvalidRequest(_))));
+    /// assert!(matches!(patch.clone().field("version", "version-2"), Err(Error::InvalidRequest(_))));
+    /// let body = to_value(patch.field("assignees", json!([]))?)?;
+    /// assert_eq!(body["id"], "case-a");
+    /// assert_eq!(body["version"], "version-1");
+    /// # Ok::<(), Box<dyn std::error::Error>>(())
+    /// ```
+    pub fn field(self, name: &str, value: impl Serialize) -> Result<Self> {
+        if matches!(name, "id" | "version") {
+            return Err(Error::InvalidRequest(format!(
+                "case patch field {name:?} is reserved"
+            )));
+        }
+        Ok(self.set(name, serde_json::to_value(value).map_err(Error::serialize)?))
     }
 
     fn set(mut self, key: &str, value: Value) -> Self {
@@ -284,11 +315,11 @@ endpoint! {
 impl FindCases<'_> {
     /// One-based page number.
     pub fn page(self, page: u32) -> Self {
-        Self(self.0.param("page", page))
+        Self(self.0.positive_param("page", page))
     }
 
     pub fn per_page(self, per_page: u32) -> Self {
-        Self(self.0.param("perPage", per_page))
+        Self(self.0.positive_param("perPage", per_page))
     }
 
     /// Restricts results to an owner such as [`SECURITY_OWNER`]. Repeat for several owners.
@@ -356,11 +387,11 @@ endpoint! {
 impl FindComments<'_> {
     /// One-based page number.
     pub fn page(self, page: u32) -> Self {
-        Self(self.0.param("page", page))
+        Self(self.0.positive_param("page", page))
     }
 
     pub fn per_page(self, per_page: u32) -> Self {
-        Self(self.0.param("perPage", per_page))
+        Self(self.0.positive_param("perPage", per_page))
     }
 
     pub fn sort_order(self, order: SortOrder) -> Self {

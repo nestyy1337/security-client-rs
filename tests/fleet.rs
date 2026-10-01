@@ -2,10 +2,10 @@ mod common;
 
 use common::Mock;
 use kibana_rs::{
-    SortOrder,
+    Error, SortOrder,
     fleet::{
-        AgentSelection, BulkActionResult, DiagnosticMetric, NewAgentPolicy, NewPackagePolicy,
-        PackageRef, PolicyInput, PolicyStream,
+        AgentPolicy, AgentSelection, BulkActionResult, DiagnosticMetric, NewAgentPolicy,
+        NewPackagePolicy, PackagePolicy, PackageRef, PolicyInput, PolicyStream,
     },
 };
 use serde_json::{Value, json};
@@ -156,7 +156,8 @@ async fn agents_are_listed_read_and_managed_individually() {
         .await
         .unwrap()
         .item;
-    assert_eq!(fetched.extra["policy_revision"], 3);
+    assert_eq!(fetched.policy_revision, Some(3));
+    assert_eq!(fetched.tags.as_deref(), Some(&["dmz".to_owned()][..]));
     mock.take()
         .route("GET", "/s/soc/api/fleet/agents/a%2F1", &[]);
 
@@ -440,6 +441,164 @@ async fn action_history_cancellation_uploads_and_binary_downloads() {
 }
 
 #[tokio::test]
+async fn agent_policy_updates_check_optional_body_ids_against_the_path() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    for body in [
+        json!({"id": "other-policy", "name": "Wrong policy", "namespace": "default"}),
+        json!({"id": null}),
+        json!({"id": 1}),
+        json!({"id": ""}),
+        json!([{"id": "p/1"}]),
+        json!(null),
+    ] {
+        let error = client
+            .fleet()
+            .update_agent_policy("p/1", &body)
+            .send()
+            .await
+            .unwrap_err();
+        assert!(matches!(error, Error::InvalidRequest(_)), "{error:?}");
+    }
+    assert_eq!(mock.request_count(), 0);
+
+    for body in [
+        json!({"name": "SOC Linux", "namespace": "default"}),
+        json!({"id": "p/1", "name": "SOC Linux", "namespace": "default",
+            "future_setting": {"id": "another-id"}}),
+    ] {
+        mock.json(json!({"item": policy("p/1")}));
+        client
+            .fleet()
+            .update_agent_policy("p/1", &body)
+            .send()
+            .await
+            .unwrap();
+        mock.take()
+            .route("PUT", "/s/soc/api/fleet/agent_policies/p%2F1", &[])
+            .body(body);
+    }
+}
+
+#[tokio::test]
+async fn agent_policy_edits_bind_identity_and_only_send_requested_settings() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let mut original = policy("p/1");
+    original["description"] = json!("Keep this description");
+    original["inactivity_timeout"] = json!(3600);
+    original["monitoring_enabled"] = json!(["logs"]);
+    original["data_output_id"] = json!("existing-output");
+    original["monitoring_output_id"] = json!("monitoring-output");
+    original["updated_at"] = json!("2026-09-30T10:00:00Z");
+    original["future_setting"] = json!({"enabled": true});
+    mock.json(json!({"item": original}));
+    let fetched = client
+        .fleet()
+        .get_agent_policy("p/1")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+        .item;
+    mock.take()
+        .route("GET", "/s/soc/api/fleet/agent_policies/p%2F1", &[]);
+
+    let edit = fetched.edit().unwrap().name("Renamed");
+    mock.json(json!({"item": original}));
+    client
+        .fleet()
+        .edit_agent_policy(&edit)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("PUT", "/s/soc/api/fleet/agent_policies/p%2F1", &[])
+        .body(json!({"name": "Renamed", "namespace": "default", "inactivity_timeout": 3600}));
+
+    let edit = fetched
+        .edit()
+        .unwrap()
+        .namespace("soc")
+        .description("")
+        .monitoring_enabled(Vec::<String>::new())
+        .inactivity_timeout(0)
+        .data_output_id("replacement-output")
+        .clear_data_output_id();
+    mock.json(json!({"item": original}));
+    client
+        .fleet()
+        .edit_agent_policy(&edit)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("PUT", "/s/soc/api/fleet/agent_policies/p%2F1", &[])
+        .body(
+            json!({"name": "SOC Linux", "namespace": "soc", "inactivity_timeout": 0,
+            "description": "", "monitoring_enabled": [], "data_output_id": null}),
+        );
+}
+
+#[tokio::test]
+async fn agent_policy_outputs_can_be_omitted_selected_or_cleared() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let minimal = NewAgentPolicy::new("SOC Linux", "default");
+    let base = json!({"name": "SOC Linux", "namespace": "default"});
+    let mut selected = base.clone();
+    selected["data_output_id"] = json!("output-id");
+    let mut cleared = base.clone();
+    cleared["data_output_id"] = Value::Null;
+    for (definition, expected) in [
+        (minimal.clone(), base),
+        (
+            minimal.clone().data_output_id("output-id"),
+            selected.clone(),
+        ),
+        (
+            minimal
+                .clone()
+                .data_output_id("output-id")
+                .clear_data_output_id(),
+            cleared,
+        ),
+        (
+            minimal.clear_data_output_id().data_output_id("output-id"),
+            selected,
+        ),
+    ] {
+        mock.json(json!({"item": policy("p1")}));
+        client
+            .fleet()
+            .update_agent_policy("p1", &definition)
+            .send()
+            .await
+            .unwrap();
+        mock.take()
+            .route("PUT", "/s/soc/api/fleet/agent_policies/p1", &[])
+            .body(expected);
+    }
+}
+
+#[test]
+fn agent_policy_edits_require_a_retrieved_inactivity_timeout() {
+    let mut body = policy("p1");
+    let fetched: AgentPolicy = serde_json::from_value(body.clone()).unwrap();
+    assert!(matches!(fetched.edit(), Err(Error::InvalidRequest(_))));
+    for invalid in [Value::Null, json!("3600"), json!(-1), json!(1.5)] {
+        body["inactivity_timeout"] = invalid;
+        let fetched: AgentPolicy = serde_json::from_value(body.clone()).unwrap();
+        assert!(matches!(fetched.edit(), Err(Error::InvalidRequest(_))));
+    }
+    body["inactivity_timeout"] = json!(0);
+    let fetched: AgentPolicy = serde_json::from_value(body).unwrap();
+    assert!(fetched.edit().is_ok());
+}
+
+#[tokio::test]
 async fn agent_policies_lifecycle() {
     let mock = Mock::start().await;
     let client = mock.soc();
@@ -512,9 +671,9 @@ async fn agent_policies_lifecycle() {
         .description("Linux servers")
         .monitoring_enabled(["logs", "metrics"])
         .data_output_id("default-output")
-        .inactivity_timeout(1209600);
+        .inactivity_timeout(1_209_600);
     let expected = json!({"name": "SOC Linux", "namespace": "default", "description": "Linux servers",
-        "monitoring_enabled": ["logs", "metrics"], "data_output_id": "default-output", "inactivity_timeout": 1209600});
+        "monitoring_enabled": ["logs", "metrics"], "data_output_id": "default-output", "inactivity_timeout": 1_209_600});
     mock.json(json!({"item": policy("p1")}));
     client
         .fleet()
@@ -703,7 +862,7 @@ async fn package_policies_use_the_simplified_format() {
     mock.json(json!({"item": package_policy("pp")}));
     client
         .fleet()
-        .update_package_policy("pp", &definition)
+        .update_package_policy(definition.replacing("pp"))
         .send()
         .await
         .unwrap();
@@ -714,6 +873,66 @@ async fn package_policies_use_the_simplified_format() {
             &[("format", "simplified")],
         )
         .body(expected);
+
+    let full_inputs = json!([{"type": "logfile", "policy_template": "system", "enabled": true,
+        "streams": [{"id": "logfile-system.syslog", "enabled": true,
+                     "data_stream": {"type": "logs", "dataset": "system.syslog"},
+                     "vars": {"paths": {"type": "text", "value": ["/var/log/syslog"]}}}]}]);
+    let mut stored = package_policy("pp");
+    stored["inputs"] = full_inputs.clone();
+    stored["inputs"][0]["compiled_input"] = json!({"generated": "response only"});
+    stored["vars"] = json!({"api_key": {"type": "password", "value": "vars-secret"}});
+    stored["version"] = json!("WzMsMV0=");
+    stored["package"]["title"] = json!("System");
+    stored["created_at"] = json!("2026-09-30T00:00:00Z");
+    mock.json(json!({"item": stored}));
+    let retrieved = client
+        .fleet()
+        .get_package_policy("pp")
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap()
+        .item;
+    mock.take()
+        .route("GET", "/s/soc/api/fleet/package_policies/pp", &[]);
+    assert!(!format!("{retrieved:?}").contains("vars-secret"));
+    let edit = retrieved
+        .edit()
+        .name("renamed-system")
+        .description("Edited")
+        .policy_ids(["p1", "p3"]);
+    assert!(
+        serde_json::to_value(&edit).unwrap()["inputs"][0]
+            .get("compiled_input")
+            .is_none()
+    );
+    let edit = edit.inputs(retrieved.inputs.clone());
+    assert!(!format!("{edit:?}").contains("vars-secret"));
+    mock.json(json!({"item": package_policy("pp")}));
+    client
+        .fleet()
+        .update_package_policy(&edit)
+        .send()
+        .await
+        .unwrap();
+    mock.take()
+        .route("PUT", "/s/soc/api/fleet/package_policies/pp", &[])
+        .body(json!({
+            "name": "renamed-system", "namespace": "default", "description": "Edited", "enabled": true,
+            "package": {"name": "system", "version": "2.5.0", "title": "System"},
+            "policy_ids": ["p1", "p3"], "inputs": full_inputs,
+            "vars": {"api_key": {"type": "password", "value": "vars-secret"}},
+            "version": "WzMsMV0="
+        }));
+    assert!(retrieved.inputs[0].get("compiled_input").is_some());
+    let debug = format!("{definition:?}");
+    assert!(
+        debug.contains("paths") && !debug.contains("/var/log/syslog"),
+        "{debug}"
+    );
 
     mock.json(json!({"id": "pp"}));
     client
@@ -730,6 +949,79 @@ async fn package_policies_use_the_simplified_format() {
             &[("force", "true")],
         )
         .no_body();
+}
+
+#[tokio::test]
+async fn package_policy_edits_require_full_inputs_and_a_version() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    let mut simplified = package_policy("pp");
+    simplified["inputs"] = json!({"system-logfile": {
+        "enabled": true,
+        "vars": {"preserve_original_event": false},
+        "streams": {"system.syslog": {"vars": {"paths": ["/var/log/syslog"]}}}
+    }});
+    simplified["vars"] = json!({"api_key": "vars-secret"});
+    simplified["version"] = json!("WzMsMV0=");
+    let definition =
+        NewPackagePolicy::new("system-1", "default", PackageRef::new("system", "2.5.0"));
+    for create in [true, false] {
+        mock.json(json!({"item": simplified}));
+        let response = if create {
+            client
+                .fleet()
+                .create_package_policy(&definition)
+                .send()
+                .await
+                .unwrap()
+        } else {
+            client
+                .fleet()
+                .update_package_policy(definition.replacing("pp"))
+                .send()
+                .await
+                .unwrap()
+        };
+        let policy = response.json().await.unwrap().item;
+        mock.take();
+        let error = client
+            .fleet()
+            .update_package_policy(&policy.edit().name("renamed"))
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidRequest(message) if message.contains("get_package_policy")),
+            "{error:?}"
+        );
+        let edit = policy.edit().inputs(json!([]));
+        let error = client
+            .fleet()
+            .update_package_policy(&edit)
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidRequest(message) if message.contains("get_package_policy")),
+            "{error:?}"
+        );
+    }
+    for version in [Value::Null, json!("")] {
+        let mut stored = package_policy("pp");
+        stored["version"] = version;
+        let policy: PackagePolicy = serde_json::from_value(stored).unwrap();
+        let error = client
+            .fleet()
+            .update_package_policy(&policy.edit())
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(&error, Error::InvalidRequest(message) if message.contains("version")),
+            "{error:?}"
+        );
+    }
+    assert_eq!(mock.request_count(), 0);
 }
 
 #[tokio::test]

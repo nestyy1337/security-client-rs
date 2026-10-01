@@ -31,6 +31,7 @@ impl KibanaPrivilege {
     }
 }
 
+/// Writable role privileges and metadata for [`Roles::put`].
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct RoleDefinition {
@@ -55,6 +56,9 @@ impl RoleDefinition {
     }
 }
 
+/// A role returned by Kibana, including read-only metadata.
+/// Submit its [`definition`](Self::definition) to [`Roles::put`], with its name
+/// as the path argument, to avoid resubmitting response-only fields.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Role {

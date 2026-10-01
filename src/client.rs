@@ -62,6 +62,8 @@ impl Kibana {
     }
 
     /// A client whose space-scoped routes use `/s/{id}`. Global routes are unchanged.
+    /// This selects a space without contacting Kibana or creating the space.
+    /// Empty IDs, dot segments and IDs containing `/` return [`Error::Configuration`].
     pub fn space(&self, id: impl Into<String>) -> Result<Self> {
         let id = id.into();
         if id.is_empty() || id == "." || id == ".." || id.contains('/') {

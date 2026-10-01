@@ -8,7 +8,7 @@
     in {
       devShells = eachSystem (pkgs: {
         default = pkgs.mkShell {
-          packages = with pkgs; [ cargo rustc rustfmt clippy pkg-config openssl curl jq nodejs uv ];
+          packages = with pkgs; [ cargo rustc rustfmt clippy pkg-config openssl curl jq uv ];
           RUST_BACKTRACE = "1";
         };
       });

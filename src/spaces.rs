@@ -8,6 +8,8 @@ use crate::{
     request::endpoint,
 };
 
+/// Space settings for administration. Selecting a client space with
+/// [`Kibana::space`] does not create or change these settings.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[non_exhaustive]
 pub struct Space {
@@ -61,12 +63,15 @@ impl<'a> Spaces<'a> {
         )
     }
 
-    /// Replaces the space's definition. The body must repeat the same `id`.
+    /// Replaces the space's definition. The JSON object body must contain a
+    /// string `id` matching the path argument. Missing, non-string or conflicting
+    /// IDs fail with [`crate::Error::InvalidRequest`] before HTTP.
     pub fn update<B: Serialize + ?Sized>(&self, id: &str, space: &B) -> UpdateSpace<'a> {
         UpdateSpace(
             self.0
                 .request(Method::PUT, Scope::Global, &["api", "spaces", "space", id])
-                .json(space),
+                .json(space)
+                .check_body_id(id, true),
         )
     }
 

@@ -1,10 +1,12 @@
 mod common;
 
+use std::time::Duration;
+
 use common::Mock;
 use kibana_rs::{
-    SortOrder,
+    Error, SortOrder,
     exceptions::{ListReference, NamespaceType},
-    security::{QueryLanguage, QueryRule, RiskScore, RuleSelector, Severity},
+    security::{QueryLanguage, QueryRule, RiskScore, RuleSchedule, RuleSelector, Severity},
 };
 use serde_json::{Value, json};
 
@@ -13,8 +15,46 @@ fn rule(id: &str) -> Value {
         "id": id, "rule_id": "stable-id", "name": "Failed logins", "description": "d",
         "enabled": false, "severity": "high", "risk_score": 73, "type": "query",
         "query": "event.outcome: failure", "tags": ["soc"], "updated_at": "2026-09-28T00:00:00Z",
-        "exceptions_list": [], "execution_summary": {"last_execution": {"status": "succeeded"}}
+        "exceptions_list": [], "execution_summary": {"last_execution": {
+            "status": "succeeded", "date": "2026-09-28T00:00:00Z", "message": "",
+            "status_order": 0, "metrics": {"total_search_duration_ms": 3}
+        }}
     })
+}
+
+#[tokio::test]
+async fn successful_rule_import_can_still_report_failed_dependencies() {
+    let mock = Mock::start().await;
+    mock.json(json!({
+        "success": true, "success_count": 1, "errors": [],
+        "exceptions_success": false,
+        "exceptions_errors": [{"list_id": "missing", "error": {"status_code": 409, "message": "conflict"}}],
+        "action_connectors_success": false,
+        "action_connectors_errors": [{"id": "connector", "error": {"status_code": 403, "message": "forbidden"}}],
+        "action_connectors_warnings": [{"type": "missing_secrets"}]
+    }));
+    let result = mock
+        .client()
+        .security()
+        .import_rules(b"{}\n".to_vec())
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(result.success);
+    assert_eq!(result.exceptions_success, Some(false));
+    assert_eq!(
+        result.exceptions_errors[0].list_id.as_deref(),
+        Some("missing")
+    );
+    assert_eq!(result.action_connectors_success, Some(false));
+    assert_eq!(result.action_connectors_errors[0].error.status_code, 403);
+    assert_eq!(
+        result.extra["action_connectors_warnings"][0]["type"],
+        "missing_secrets"
+    );
 }
 
 #[tokio::test]
@@ -73,7 +113,12 @@ async fn find_rules_sends_only_selected_options_and_decodes_pages() {
     assert_eq!((page.page, page.per_page, page.total), (2, 1, 3));
     assert_eq!(page.data[0].severity, "high");
     assert_eq!(
-        page.data[0].extra["execution_summary"]["last_execution"]["status"],
+        page.data[0]
+            .execution_summary
+            .as_ref()
+            .unwrap()
+            .last_execution
+            .status,
         "succeeded"
     );
     mock.take().route(
@@ -186,8 +231,7 @@ async fn query_rules_serialize_defaults_and_every_option() {
         .severity(Severity::Critical)
         .risk_score(RiskScore::new(99).unwrap())
         .enabled(true)
-        .interval("1m")
-        .from("now-2m")
+        .schedule(RuleSchedule::new(Duration::from_secs(60), Duration::from_secs(60)).unwrap())
         .tags(["soc", "linux"])
         .rule_id("custom-rule")
         .exceptions_list(vec![list]);
@@ -290,7 +334,7 @@ async fn exports_stream_ndjson_and_imports_upload_multipart_with_partial_failure
         .route("POST", "/s/soc/api/detection_engine/rules/_export", &[])
         .no_body();
 
-    mock.json(json!({"success": false, "success_count": 0, "errors": [{"rule_id": "a", "error": {"status_code": 409}}],
+    mock.json(json!({"success": false, "success_count": 0, "errors": [{"rule_id": "a", "error": {"status_code": 409, "message": "conflict"}}],
                      "rules_count": 1, "exceptions_success": true}));
     let result = client
         .security()
@@ -306,7 +350,9 @@ async fn exports_stream_ndjson_and_imports_upload_multipart_with_partial_failure
         .await
         .unwrap();
     assert!(!result.success);
-    assert_eq!(result.errors[0]["error"]["status_code"], 409);
+    assert_eq!(result.errors[0].error.status_code, 409);
+    assert_eq!(result.errors[0].rule_id.as_deref(), Some("a"));
+    assert_eq!(result.exceptions_success, Some(true));
     assert_eq!(result.extra["rules_count"], 1);
     let request = mock.take();
     request.route(
@@ -335,4 +381,104 @@ fn risk_scores_above_100_are_rejected() {
         Err(kibana_rs::Error::InvalidRequest(_))
     ));
     assert!(RiskScore::try_from(255).is_err());
+}
+
+#[test]
+fn schedules_derive_a_lookback_covering_the_interval() {
+    let body = |rule: QueryRule| {
+        let value = serde_json::to_value(rule).unwrap();
+        (value["interval"].clone(), value["from"].clone())
+    };
+    let rule = || QueryRule::new("n", "d", "q");
+    assert_eq!(body(rule()), (json!("5m"), json!("now-6m")));
+    let every = |secs| RuleSchedule::every(Duration::from_secs(secs)).unwrap();
+    assert_eq!(
+        body(rule().schedule(every(900))),
+        (json!("15m"), json!("now-16m"))
+    );
+    assert_eq!(
+        body(rule().schedule(every(3540))),
+        (json!("59m"), json!("now-1h"))
+    );
+    let exact = RuleSchedule::new(Duration::from_secs(90), Duration::ZERO).unwrap();
+    assert_eq!(
+        body(rule().schedule(exact)),
+        (json!("90s"), json!("now-90s"))
+    );
+    assert_eq!(exact.lookback(), exact.interval());
+    assert_eq!(
+        body(rule().custom_schedule("1h", "now-2h/h")),
+        (json!("1h"), json!("now-2h/h"))
+    );
+    for invalid in [
+        RuleSchedule::every(Duration::ZERO),
+        RuleSchedule::every(Duration::from_millis(1500)),
+        RuleSchedule::new(Duration::from_secs(60), Duration::from_millis(1)),
+    ] {
+        assert!(matches!(invalid, Err(Error::InvalidRequest(_))));
+    }
+}
+
+#[tokio::test]
+async fn patches_cannot_silently_change_the_selector_or_bypass_validation() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    for (field, value) in [
+        ("id", json!("b")),
+        ("rule_id", json!("other")),
+        ("risk_score", json!(500)),
+        ("severity", json!("extreme")),
+        ("interval", json!("15m")),
+        ("from", json!("now-1m")),
+    ] {
+        let error = client
+            .security()
+            .patch_rule(RuleSelector::Id("a"))
+            .schedule(RuleSchedule::every(Duration::from_secs(300)).unwrap())
+            .field(field, value)
+            .send()
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::InvalidRequest(_)),
+            "{field}: {error:?}"
+        );
+    }
+    for error in [
+        client
+            .security()
+            .patch_rule(RuleSelector::Id(""))
+            .enabled(true)
+            .send()
+            .await
+            .unwrap_err(),
+        client
+            .security()
+            .get_rule(RuleSelector::RuleId(""))
+            .send()
+            .await
+            .unwrap_err(),
+        client
+            .security()
+            .delete_rule(RuleSelector::Id(""))
+            .send()
+            .await
+            .unwrap_err(),
+    ] {
+        assert!(matches!(error, Error::InvalidRequest(_)), "{error:?}");
+    }
+    assert_eq!(mock.request_count(), 0);
+
+    mock.json(rule("a"));
+    client
+        .security()
+        .patch_rule(RuleSelector::Id("a"))
+        .schedule(RuleSchedule::every(Duration::from_secs(600)).unwrap())
+        .unchecked_field("rule_id", "deliberate")
+        .send()
+        .await
+        .unwrap();
+    mock.take().body(json!({
+        "id": "a", "interval": "10m", "from": "now-11m", "rule_id": "deliberate"
+    }));
 }

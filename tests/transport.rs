@@ -1,5 +1,6 @@
 mod common;
 
+use std::fmt::Write as _;
 use std::time::Duration;
 
 use common::Mock;
@@ -10,11 +11,37 @@ use kibana_rs::{
         Body, Credentials, Method, StatusCode, Transport, TransportBuilder, Url,
         headers::{AUTHORIZATION, HeaderMap, HeaderName, HeaderValue},
     },
+    security::Severity,
 };
 use serde_json::{Value, json};
 
 fn transport(url: &str) -> TransportBuilder {
     TransportBuilder::new(Url::parse(url).unwrap())
+}
+
+#[tokio::test]
+async fn decode_errors_keep_response_headers_without_logging_their_values() {
+    let mock = Mock::start().await;
+    mock.reply_with(
+        200,
+        vec![("x-opaque-id", "decode-header-secret".into())],
+        "not json",
+    );
+    let error = mock
+        .client()
+        .status()
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap_err();
+    assert_eq!(error.status(), Some(StatusCode::OK));
+    assert_eq!(
+        error.headers().unwrap()["x-opaque-id"],
+        "decode-header-secret"
+    );
+    assert!(!format!("{error:?}").contains("decode-header-secret"));
 }
 
 #[tokio::test]
@@ -196,7 +223,7 @@ async fn response_limits_and_decode_errors_are_distinct() {
             .json()
             .await
             .unwrap_err(),
-        Error::ResponseTooLarge { limit: 8 }
+        Error::ResponseTooLarge { limit: 8, .. }
     ));
     mock.reply(200, "0123456789");
     assert!(matches!(
@@ -208,7 +235,7 @@ async fn response_limits_and_decode_errors_are_distinct() {
             .text()
             .await
             .unwrap_err(),
-        Error::ResponseTooLarge { limit: 8 }
+        Error::ResponseTooLarge { limit: 8, .. }
     ));
     mock.reply(200, "0123456789");
     let chunks: Vec<_> = limited
@@ -225,6 +252,14 @@ async fn response_limits_and_decode_errors_are_distinct() {
 
 #[tokio::test]
 async fn responses_expose_status_headers_and_alternative_decoding() {
+    #[derive(serde::Deserialize)]
+    struct Version {
+        number: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Status {
+        version: Version,
+    }
     let mock = Mock::start().await;
     mock.reply_with(
         201,
@@ -235,14 +270,6 @@ async fn responses_expose_status_headers_and_alternative_decoding() {
     assert_eq!(response.status_code(), StatusCode::CREATED);
     assert_eq!(response.headers()["x-trace"], "abc");
     assert_eq!(response.content_length(), Some(30));
-    #[derive(serde::Deserialize)]
-    struct Version {
-        number: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct Status {
-        version: Version,
-    }
     assert_eq!(
         response.json_as::<Status>().await.unwrap().version.number,
         "9.5.4"
@@ -472,6 +499,30 @@ async fn debug_output_omits_proxy_passwords_query_values_and_bodies() {
 }
 
 #[tokio::test]
+async fn response_and_decode_error_diagnostics_do_not_expose_values() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    mock.json(json!("body-secret"));
+    let response = client
+        .request(Method::GET, Scope::Global, &["api", "status"])
+        .query(&[("token", "query-secret")])
+        .send()
+        .await
+        .unwrap();
+    assert!(response.url().as_str().contains("query-secret"));
+    assert!(!format!("{response:?}").contains("query-secret"));
+
+    let error = response.json_as::<u64>().await.unwrap_err();
+    assert_eq!(error.body(), Some("\"body-secret\""));
+    let mut cause: Option<&dyn std::error::Error> = Some(&error);
+    while let Some(error) = cause {
+        assert!(!format!("{error}").contains("body-secret"));
+        assert!(!format!("{error:?}").contains("body-secret"));
+        cause = error.source();
+    }
+}
+
+#[tokio::test]
 async fn an_interrupted_error_body_keeps_status_headers_and_partial_body() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -613,4 +664,313 @@ async fn transport_errors_do_not_reveal_query_values() {
     ] {
         assert!(!text.contains("query-secret"), "{text}");
     }
+}
+
+#[tokio::test]
+async fn headers_are_prepared_once_with_defaults_body_then_request_precedence() {
+    let mock = Mock::start().await;
+    let mut defaults = HeaderMap::new();
+    defaults.insert("content-type", HeaderValue::from_static("text/plain"));
+    defaults.append("x-multi", HeaderValue::from_static("one"));
+    defaults.append("x-multi", HeaderValue::from_static("two"));
+    defaults.insert("x-team", HeaderValue::from_static("blue"));
+    let client = Kibana::new(transport(&mock.url).headers(defaults).build().unwrap());
+
+    mock.json(json!({}));
+    client
+        .request(Method::POST, Scope::Global, &["api", "x"])
+        .json(&json!({"a": 1}))
+        .send()
+        .await
+        .unwrap();
+    let request = mock.take();
+    let values = |name: &str| -> Vec<&str> {
+        request
+            .headers
+            .get_all(name)
+            .iter()
+            .map(|v| v.to_str().unwrap())
+            .collect()
+    };
+    assert_eq!(
+        values("content-type"),
+        ["application/json"],
+        "the body's type replaces the default"
+    );
+    assert_eq!(
+        values("x-multi"),
+        ["one", "two"],
+        "repeated default values are all sent"
+    );
+
+    mock.json(json!({}));
+    client
+        .request(Method::GET, Scope::Global, &["api", "x"])
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(
+        mock.take().header("content-type"),
+        Some("text/plain"),
+        "defaults apply without a body"
+    );
+
+    mock.json(json!({}));
+    client
+        .request(Method::POST, Scope::Global, &["api", "x"])
+        .body(Body::file("file", "a.ndjson", "application/ndjson", b"{}\n".to_vec()).unwrap())
+        .header(
+            HeaderName::from_static("x-multi"),
+            HeaderValue::from_static("three"),
+        )
+        .send()
+        .await
+        .unwrap();
+    let request = mock.take();
+    let content_types: Vec<_> = request.headers.get_all("content-type").iter().collect();
+    assert_eq!(content_types.len(), 1, "{content_types:?}");
+    assert_eq!(
+        request.multipart_file("a.ndjson", "application/ndjson"),
+        "{}\n"
+    );
+    let multi: Vec<_> = request.headers.get_all("x-multi").iter().collect();
+    assert_eq!(
+        multi,
+        ["three"],
+        "a request header replaces every default value"
+    );
+    assert_eq!(request.header("x-team"), Some("blue"));
+
+    mock.json(json!({}));
+    client
+        .request(Method::POST, Scope::Global, &["api", "x"])
+        .json(&json!({}))
+        .header(
+            HeaderName::from_static("content-type"),
+            HeaderValue::from_static("application/vnd.custom+json"),
+        )
+        .send()
+        .await
+        .unwrap();
+    let request = mock.take();
+    let content_types: Vec<_> = request.headers.get_all("content-type").iter().collect();
+    assert_eq!(content_types, ["application/vnd.custom+json"]);
+}
+
+#[tokio::test]
+async fn raw_paths_cannot_escape_the_base_path() {
+    let mock = Mock::start_at("/kibana/proxy/").await;
+    let client = Kibana::new(Transport::single_node(&mock.url).unwrap());
+    for path in [
+        "../../api/security/role",
+        "api/../../../api/security/role",
+        "%2e%2e/%2E%2e/api/security/role",
+        ".%2e/api/security/role",
+        "api/%2e/status",
+        "api/.\t./status",
+        "api/\n",
+    ] {
+        let error = client
+            .transport()
+            .send::<()>(Method::GET, path, HeaderMap::new(), None, None, None)
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(error, Error::InvalidRequest(_)),
+            "{path:?}: {error:?}"
+        );
+    }
+    assert_eq!(mock.request_count(), 0);
+
+    mock.json(json!({}));
+    client
+        .transport()
+        .send::<()>(
+            Method::GET,
+            "api/%252e%252e/x..y/.hidden",
+            HeaderMap::new(),
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+    mock.take()
+        .route("GET", "/kibana/proxy/api/%252e%252e/x..y/.hidden", &[]);
+}
+
+/// Answers one request with `head` and then closes the connection.
+async fn truncated_server(head: &'static [u8]) -> String {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buffer = [0; 4096];
+        let _ = socket.read(&mut buffer).await.unwrap();
+        socket.write_all(head).await.unwrap();
+    });
+    url
+}
+
+#[tokio::test]
+async fn interrupted_streams_keep_response_context_and_delivered_byte_counts() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    for chunks in [vec![], vec![&b"stream-"[..], &b"body-secret"[..]]] {
+        let expected_received: usize = chunks.iter().map(|chunk| chunk.len()).sum();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let (proceed, mut delivered) = tokio::sync::mpsc::channel(1);
+        let server_chunks = chunks.clone();
+        let server = tokio::spawn(async move {
+            let (mut socket, _) = listener.accept().await.unwrap();
+            let mut buffer = [0; 4096];
+            let _ = socket.read(&mut buffer).await.unwrap();
+            socket
+                .write_all(b"HTTP/1.1 201 Created\r\nx-operation: header-secret\r\ncontent-length: 100\r\n\r\n")
+                .await
+                .unwrap();
+            for chunk in server_chunks {
+                socket.write_all(chunk).await.unwrap();
+                delivered.recv().await.unwrap();
+            }
+        });
+
+        let client = Kibana::new(transport(&url).response_limit(1).build().unwrap());
+        let response = client
+            .request(Method::GET, Scope::Global, &["api", "x"])
+            .query(&[("token", "query-secret")])
+            .send()
+            .await
+            .unwrap();
+        let mut stream = std::pin::pin!(response.bytes_stream());
+        let error = tokio::time::timeout(Duration::from_secs(5), async {
+            for expected in chunks {
+                let mut bytes = Vec::new();
+                while bytes.len() < expected.len() {
+                    bytes.extend_from_slice(&stream.try_next().await.unwrap().unwrap());
+                }
+                assert_eq!(bytes, expected);
+                proceed.send(()).await.unwrap();
+            }
+            stream.try_next().await.unwrap_err()
+        })
+        .await
+        .unwrap();
+        server.await.unwrap();
+
+        assert_eq!(error.status(), Some(StatusCode::CREATED));
+        assert_eq!(error.headers().unwrap()["x-operation"], "header-secret");
+        assert!(error.transport().is_some());
+        assert!(matches!(
+            error,
+            Error::Body { received, .. } if received == expected_received
+        ));
+        let mut chain = format!("{error} {error:?}");
+        let mut source = std::error::Error::source(&error);
+        while let Some(next) = source {
+            write!(chain, " {next} {next:?}").unwrap();
+            source = next.source();
+        }
+        for secret in ["header-secret", "body-secret", "query-secret"] {
+            assert!(!chain.contains(secret), "{chain}");
+        }
+    }
+}
+
+#[tokio::test]
+async fn an_interrupted_success_body_keeps_status_and_headers() {
+    let url = truncated_server(
+        b"HTTP/1.1 201 Created\r\nx-operation: op-7\r\ncontent-length: 100\r\n\r\n{\"id\":",
+    )
+    .await;
+    let client = Kibana::new(Transport::single_node(&url).unwrap());
+    let error = client
+        .request(Method::POST, Scope::Global, &["api", "x"])
+        .json(&json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap_err();
+    assert_eq!(error.status(), Some(StatusCode::CREATED));
+    assert_eq!(error.headers().unwrap()["x-operation"], "op-7");
+    assert!(error.transport().is_some());
+    match &error {
+        Error::Body { received, .. } => assert_eq!(*received, 6),
+        other => panic!("expected a body error, got {other:?}"),
+    }
+
+    let mock = Mock::start().await;
+    let limited = Kibana::new(transport(&mock.url).response_limit(4).build().unwrap());
+    mock.reply_with(200, vec![("x-operation", "op-8".into())], "0123456789");
+    let error = limited
+        .status()
+        .send()
+        .await
+        .unwrap()
+        .bytes()
+        .await
+        .unwrap_err();
+    assert_eq!(error.status(), Some(StatusCode::OK));
+    assert_eq!(error.headers().unwrap()["x-operation"], "op-8");
+}
+
+#[tokio::test]
+async fn decode_errors_and_response_debug_do_not_reveal_response_or_query_values() {
+    let mock = Mock::start().await;
+    let client = mock.client();
+    mock.reply(200, r#""response-secret""#);
+    let error = client
+        .request(Method::GET, Scope::Global, &["api", "x"])
+        .query(&[("token", "query-secret")])
+        .send()
+        .await
+        .unwrap()
+        .json_as::<Severity>()
+        .await
+        .unwrap_err();
+    let mut chain = format!("{error} {error:?}");
+    let mut source = std::error::Error::source(&error);
+    while let Some(next) = source {
+        write!(chain, " {next} {next:?}").unwrap();
+        source = next.source();
+    }
+    assert!(!chain.contains("response-secret"), "{chain}");
+    assert!(chain.contains("line 1"), "{chain}");
+    let Error::Decode { source, body, .. } = &error else {
+        panic!("expected a decode error, got {error:?}")
+    };
+    assert!(
+        source.inner().to_string().contains("response-secret"),
+        "rich detail stays reachable"
+    );
+    assert!(body.contains("response-secret"));
+
+    mock.json(json!({}));
+    let response = client
+        .request(Method::GET, Scope::Global, &["api", "x"])
+        .query(&[("token", "query-secret")])
+        .send()
+        .await
+        .unwrap();
+    let debug = format!("{response:?}");
+    assert!(
+        debug.contains("/api/x") && !debug.contains("query-secret"),
+        "{debug}"
+    );
+    assert!(
+        response.url().as_str().contains("query-secret"),
+        "url() is deliberate"
+    );
+
+    let builder = transport("http://user:url-secret@localhost/?token=query-secret");
+    let debug = format!("{builder:?}");
+    assert!(
+        !debug.contains("url-secret") && !debug.contains("query-secret"),
+        "{debug}"
+    );
+    assert!(builder.build().is_err());
 }
