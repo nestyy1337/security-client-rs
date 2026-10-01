@@ -4,10 +4,6 @@ An async Rust client for the Kibana HTTP API, focused on security operations: de
 
 The project is pre-1.0. It is not affiliated with or supported by Elastic.
 
-The [working notes](notes/work-in-progress.md) describe current work and rough
-edges. [Ideas and TODOs](notes/ideas-and-todos.md) are a working list, with room
-for proposals that still need a reason to implement them.
-
 ## Coverage
 
 <!-- BEGIN API COVERAGE -->
