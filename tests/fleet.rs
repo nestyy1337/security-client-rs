@@ -671,9 +671,9 @@ async fn agent_policies_lifecycle() {
         .description("Linux servers")
         .monitoring_enabled(["logs", "metrics"])
         .data_output_id("default-output")
-        .inactivity_timeout(1209600);
+        .inactivity_timeout(1_209_600);
     let expected = json!({"name": "SOC Linux", "namespace": "default", "description": "Linux servers",
-        "monitoring_enabled": ["logs", "metrics"], "data_output_id": "default-output", "inactivity_timeout": 1209600});
+        "monitoring_enabled": ["logs", "metrics"], "data_output_id": "default-output", "inactivity_timeout": 1_209_600});
     mock.json(json!({"item": policy("p1")}));
     client
         .fleet()

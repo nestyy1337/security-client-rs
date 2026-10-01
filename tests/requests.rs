@@ -22,7 +22,7 @@ fn unserializable() -> BTreeMap<(u8, u8), u8> {
 async fn json_composition_preserves_floats_and_rejects_unsupported_integers() {
     let mock = Mock::start().await;
     let client = mock.client();
-    let fraction = 2.291712365432881e-9_f64;
+    let fraction = 2.291_712_365_432_881e-9_f64;
     mock.json(json!({}));
     client
         .request(Method::POST, Scope::Space, &["api", "x"])
@@ -35,7 +35,7 @@ async fn json_composition_preserves_floats_and_rejects_unsupported_integers() {
         serde_json::to_vec(&json!({"fraction": fraction})).unwrap()
     );
 
-    for value in [u64::MAX as u128 + 2, u128::MAX] {
+    for value in [u128::from(u64::MAX) + 2, u128::MAX] {
         let error = client
             .request(Method::POST, Scope::Space, &["api", "x"])
             .json(&BTreeMap::from([("integer", value)]))

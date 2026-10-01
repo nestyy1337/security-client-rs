@@ -159,6 +159,7 @@ impl<'a> Request<'a> {
     }
 
     /// Sets a query parameter, replacing an earlier value with the same key.
+    #[allow(clippy::needless_pass_by_value)]
     pub(crate) fn param(mut self, key: &str, value: impl ToString) -> Self {
         self.query.retain(|(k, _)| k != key);
         self.query.push((key.to_owned(), value.to_string()));
@@ -193,6 +194,7 @@ impl<'a> Request<'a> {
     }
 
     /// Adds a query parameter, keeping earlier values with the same key.
+    #[allow(clippy::needless_pass_by_value)]
     pub(crate) fn append_param(mut self, key: &str, value: impl ToString) -> Self {
         self.query.push((key.to_owned(), value.to_string()));
         self

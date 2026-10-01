@@ -95,7 +95,7 @@ async fn create_or_find(client: &Kibana, rule: &QueryRule, rule_id: &str) -> Res
         {
             // A successful status that arrived before the failure shows Kibana
             // accepted the request, not that the rule is as requested.
-            if let Some(status) = error.status().filter(|s| s.is_success()) {
+            if let Some(status) = error.status().filter(StatusCode::is_success) {
                 eprintln!("Kibana answered {status} before the failure; reading the rule back");
             }
             client
@@ -116,7 +116,7 @@ async fn close_case(client: &Kibana, case_id: &str) -> Result<()> {
         let case = client.cases().get(case_id).send().await?.json().await?;
         let patch = CasePatch::new(&case.id, &case.version).status(CaseStatus::Closed);
         match client.cases().update([patch]).send().await {
-            Err(error) if error.status() == Some(StatusCode::CONFLICT) => continue,
+            Err(error) if error.status() == Some(StatusCode::CONFLICT) => {}
             other => return other.map(|_| ()),
         }
     }

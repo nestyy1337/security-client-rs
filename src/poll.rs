@@ -233,7 +233,7 @@ mod tests {
         let error = wait(
             options(100, 10),
             || async { Err::<Option<()>, _>(crate::Error::InvalidRequest("boom".into())) },
-            |_| false,
+            |()| false,
         )
         .await
         .unwrap_err();
