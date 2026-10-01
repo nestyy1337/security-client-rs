@@ -20,9 +20,6 @@ default = []
 # Debug events per request; see the README.
 tracing = ["dep:tracing"]
 
-[workspace]
-members = ["demo"]
-
 [dependencies]
 base64 = "0.22"
 bytes = "1"
