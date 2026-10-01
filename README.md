@@ -177,6 +177,8 @@ to the reviewed commit.
 
 ## License
 
-Licensed under either the [Apache License 2.0](LICENSE-APACHE) or the [MIT license](LICENSE-MIT), at your option.
+Copyright (c) 2026 kibana-rs contributors.
+
+Licensed under the [Apache License 2.0](LICENSE-APACHE).
 
 Kibana and Elasticsearch are trademarks of Elasticsearch B.V.

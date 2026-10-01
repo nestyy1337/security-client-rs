@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
 description = "Async Kibana client for security operations and Fleet management"
-license = "MIT OR Apache-2.0"
+license = "Apache-2.0"
 repository = "https://github.com/nestyy1337/security-client-rs"
 readme = "README.md"
 documentation = "https://docs.rs/kibana-rs"
 keywords = ["kibana", "elastic", "siem", "security", "fleet"]
 categories = ["api-bindings", "web-programming::http-client"]
-include = ["/src/**/*.rs", "/examples/**/*.rs", "/tests/*.rs", "/tests/common/*.rs", "/tests/fixtures/*.json", "/docs/*.md", "/README.md", "/CHANGELOG.md", "/LICENSE-APACHE", "/LICENSE-MIT"]
+include = ["/src/**/*.rs", "/examples/**/*.rs", "/tests/*.rs", "/tests/common/*.rs", "/tests/fixtures/*.json", "/docs/*.md", "/README.md", "/CHANGELOG.md", "/LICENSE-APACHE"]
 
 [package.metadata.docs.rs]
 all-features = true
