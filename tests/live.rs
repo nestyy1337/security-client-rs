@@ -1,7 +1,7 @@
 //! Run only against a disposable, dedicated Kibana deployment.
 use std::time::Duration;
 
-use kibana_rs::{
+use security_client_rs::{
     Kibana, Result,
     cases::{CaseComment, CasePatch, CaseStatus, NewCase},
     exceptions::{
@@ -33,7 +33,7 @@ fn client() -> Kibana {
 async fn space(root: &Kibana) -> (String, Kibana) {
     let id = format!("krs-test-{}", uuid::Uuid::new_v4());
     let mut space = Space::new(&id, &id);
-    space.description = Some("kibana-rs integration test".into());
+    space.description = Some("security-client-rs integration test".into());
     root.spaces().create(&space).send().await.unwrap();
     let scoped = root.space(&id).unwrap();
     (id, scoped)

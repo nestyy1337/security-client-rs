@@ -14,7 +14,7 @@ use axum::{
     http::{HeaderMap, Response},
     routing::any,
 };
-use kibana_rs::{Kibana, http::Transport};
+use security_client_rs::{Kibana, http::Transport};
 use serde_json::Value;
 
 #[derive(Default)]

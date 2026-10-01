@@ -1,7 +1,7 @@
 //! Streams a rule export to a file and imports it, reporting per-rule failures
 //! that Kibana returns inside a successful response.
 use futures_util::TryStreamExt;
-use kibana_rs::{
+use security_client_rs::{
     Kibana,
     http::{Credentials, TransportBuilder, Url},
 };

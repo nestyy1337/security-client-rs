@@ -1,6 +1,6 @@
 //! Reads whole collections with `items()` and `pages()` instead of paging by hand.
 use futures_util::TryStreamExt;
-use kibana_rs::{
+use security_client_rs::{
     Kibana,
     http::{Credentials, TransportBuilder, Url},
 };

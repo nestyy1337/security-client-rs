@@ -226,7 +226,7 @@ impl QueryRule {
     /// [`RuleSchedule`]: every 5 minutes, searching the last 6.
     ///
     /// ```
-    /// use kibana_rs::security::{QueryRule, RuleSchedule};
+    /// use security_client_rs::security::{QueryRule, RuleSchedule};
     /// use serde_json::to_value;
     /// use std::time::Duration;
     ///
@@ -590,10 +590,10 @@ impl PatchRule<'_> {
     /// the offending field.
     ///
     /// ```
-    /// use kibana_rs::{Error, Kibana, http::Transport, security::RuleSelector};
+    /// use security_client_rs::{Error, Kibana, http::Transport, security::RuleSelector};
     ///
     /// # #[tokio::main]
-    /// # async fn main() -> kibana_rs::Result<()> {
+    /// # async fn main() -> security_client_rs::Result<()> {
     /// let client = Kibana::new(Transport::single_node("http://127.0.0.1:9")?);
     /// let patch = client.security().patch_rule(RuleSelector::RuleId("failed-logins"));
     /// let error = patch.field("rule_id", "another-rule").send().await.unwrap_err();

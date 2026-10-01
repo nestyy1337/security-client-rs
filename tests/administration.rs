@@ -1,7 +1,7 @@
 mod common;
 
 use common::Mock;
-use kibana_rs::{
+use security_client_rs::{
     Error,
     roles::{KibanaPrivilege, RoleDefinition},
     spaces::Space,

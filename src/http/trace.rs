@@ -14,7 +14,7 @@ use http::{HeaderMap, Method, StatusCode};
 use super::Response;
 use crate::{Error, Result};
 
-const TARGET: &str = "kibana_rs";
+const TARGET: &str = "security_client_rs";
 
 #[derive(Clone)]
 pub(crate) struct Request {

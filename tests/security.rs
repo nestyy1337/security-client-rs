@@ -3,7 +3,7 @@ mod common;
 use std::time::Duration;
 
 use common::Mock;
-use kibana_rs::{
+use security_client_rs::{
     Error, SortOrder,
     exceptions::{ListReference, NamespaceType},
     security::{QueryLanguage, QueryRule, RiskScore, RuleSchedule, RuleSelector, Severity},
@@ -378,7 +378,7 @@ fn risk_scores_above_100_are_rejected() {
     assert_eq!(RiskScore::new(100).unwrap().get(), 100);
     assert!(matches!(
         RiskScore::new(101),
-        Err(kibana_rs::Error::InvalidRequest(_))
+        Err(security_client_rs::Error::InvalidRequest(_))
     ));
     assert!(RiskScore::try_from(255).is_err());
 }

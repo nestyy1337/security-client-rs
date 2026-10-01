@@ -2,7 +2,7 @@
 //! a mutation whose outcome is unknown. The client never retries by itself.
 use std::time::Duration;
 
-use kibana_rs::{
+use security_client_rs::{
     Error, Kibana, Result,
     cases::{CasePatch, CaseStatus},
     http::{Credentials, StatusCode, TransportBuilder, Url},

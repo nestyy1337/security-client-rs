@@ -1,4 +1,4 @@
-use kibana_rs::{
+use security_client_rs::{
     Kibana,
     http::{Credentials, TransportBuilder, Url},
 };

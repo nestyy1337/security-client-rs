@@ -169,7 +169,7 @@ impl CasePatch {
     /// are reserved; supply them through [`Self::new`].
     ///
     /// ```
-    /// use kibana_rs::{Error, cases::CasePatch};
+    /// use security_client_rs::{Error, cases::CasePatch};
     /// use serde_json::{json, to_value};
     ///
     /// let patch = CasePatch::new("case-a", "version-1");

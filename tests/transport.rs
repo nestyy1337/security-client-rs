@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use common::Mock;
 use futures_util::TryStreamExt;
-use kibana_rs::{
+use security_client_rs::{
     Error, Kibana, Scope,
     http::{
         Body, Credentials, Method, StatusCode, Transport, TransportBuilder, Url,
@@ -78,12 +78,12 @@ async fn routing_preserves_proxy_prefix_and_encodes_segments_without_scoping_glo
     );
     assert_eq!(request.query.as_deref(), Some("filter=name%3A+a%2Bb+%26+c"));
     assert_eq!(request.header("authorization"), Some("ApiKey test-key"));
-    assert_eq!(request.header("kbn-xsrf"), Some("kibana-rs"));
+    assert_eq!(request.header("kbn-xsrf"), Some("security-client-rs"));
     assert!(
         request
             .header("user-agent")
             .unwrap()
-            .starts_with("kibana-rs/")
+            .starts_with("security-client-rs/")
     );
     request.no_body();
 
@@ -574,7 +574,7 @@ WNe2dl/GLMFkOFT/MMkZvM1tSs/clK5OtefTJdd1MGkCIQCdXyI/ESqHQjOyl7+n
 #[test]
 fn certificates_must_contain_a_usable_certificate() {
     use base64::Engine;
-    use kibana_rs::http::Certificate;
+    use security_client_rs::http::Certificate;
     let with_root = |certificate: Certificate| {
         transport("https://localhost")
             .root_certificate(certificate)
@@ -636,7 +636,7 @@ async fn transport_default_headers_merge_and_later_values_replace_earlier_ones()
     assert_eq!(request.header("x-region"), Some("eu"));
     assert_eq!(
         request.header("kbn-xsrf"),
-        Some("kibana-rs"),
+        Some("security-client-rs"),
         "built-in defaults stay"
     );
 }

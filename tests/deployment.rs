@@ -1,6 +1,6 @@
 //! Executed by tests/deployment/run.py against a disposable, digest-locked stack.
 use futures_util::TryStreamExt;
-use kibana_rs::{
+use security_client_rs::{
     Error, Kibana, Result,
     exceptions::{Entry, ListSelector, NewItem, NewList, Operator},
     fleet::{

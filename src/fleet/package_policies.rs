@@ -68,7 +68,7 @@ impl PackagePolicy {
     /// them. Response-only `compiled_input` fields are removed from the inputs.
     ///
     /// ```
-    /// use kibana_rs::fleet::PackagePolicy;
+    /// use security_client_rs::fleet::PackagePolicy;
     /// use serde_json::{from_value, json, to_value};
     ///
     /// let policy: PackagePolicy = from_value(json!({

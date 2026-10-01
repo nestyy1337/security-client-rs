@@ -112,9 +112,9 @@ impl ExceptionList {
     /// Sending the edit fails locally if the retrieved token is missing or empty.
     ///
     /// ```no_run
-    /// use kibana_rs::exceptions::ListSelector;
+    /// use security_client_rs::exceptions::ListSelector;
     ///
-    /// # async fn rename(client: &kibana_rs::Kibana) -> kibana_rs::Result<()> {
+    /// # async fn rename(client: &security_client_rs::Kibana) -> security_client_rs::Result<()> {
     /// let exceptions = client.exceptions();
     /// let list = exceptions.get_list(ListSelector::Id("list-id")).send().await?.json().await?;
     /// let edit = list.edit().name("Renamed list");
@@ -659,7 +659,7 @@ impl ExceptionItem {
     /// Existing comments stay on the server; only newly added comments are sent.
     ///
     /// ```
-    /// use kibana_rs::exceptions::ExceptionItem;
+    /// use security_client_rs::exceptions::ExceptionItem;
     /// use serde_json::{from_value, json, to_value};
     ///
     /// let item: ExceptionItem = from_value(json!({

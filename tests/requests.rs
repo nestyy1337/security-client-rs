@@ -4,7 +4,7 @@ mod common;
 use std::collections::BTreeMap;
 
 use common::Mock;
-use kibana_rs::{
+use security_client_rs::{
     Error, Scope,
     cases::{CasePatch, CaseStatus},
     http::{Body, Method},
@@ -102,7 +102,7 @@ async fn serialization_failures_are_reported_by_send_without_a_request() {
 
 #[tokio::test]
 async fn named_builders_can_extend_a_request_without_rebuilding_it() {
-    use kibana_rs::http::headers::{HeaderName, HeaderValue};
+    use security_client_rs::http::headers::{HeaderName, HeaderValue};
     use std::time::Duration;
 
     let mock = Mock::start_at("/proxy").await;

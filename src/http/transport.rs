@@ -214,10 +214,10 @@ impl TransportBuilder {
         }
 
         let mut headers = HeaderMap::new();
-        headers.insert("kbn-xsrf", HeaderValue::from_static("kibana-rs"));
+        headers.insert("kbn-xsrf", HeaderValue::from_static("security-client-rs"));
         headers.insert(
             USER_AGENT,
-            HeaderValue::from_static(concat!("kibana-rs/", env!("CARGO_PKG_VERSION"))),
+            HeaderValue::from_static(concat!("security-client-rs/", env!("CARGO_PKG_VERSION"))),
         );
         if let Some(credentials) = &self.credentials {
             headers.insert(AUTHORIZATION, credentials.header()?);

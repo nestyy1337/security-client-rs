@@ -3,7 +3,7 @@ mod common;
 use std::collections::BTreeMap;
 
 use common::Mock;
-use kibana_rs::{
+use security_client_rs::{
     cases::{CasePatch, CaseStatus},
     exceptions::{ExceptionItem, NamespaceType},
     fleet::{ActionStatus, AgentPolicy, PackagePolicy},

@@ -45,7 +45,7 @@ impl ActionStatus {
     /// treating the action as successful.
     ///
     /// ```
-    /// use kibana_rs::fleet::ActionStatus;
+    /// use security_client_rs::fleet::ActionStatus;
     ///
     /// assert!(ActionStatus::Failed.is_finished());
     /// assert!(!ActionStatus::InProgress.is_finished());

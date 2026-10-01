@@ -9,7 +9,7 @@ use std::{
 };
 
 use common::Mock;
-use kibana_rs::{
+use security_client_rs::{
     Kibana,
     http::{
         Credentials, TransportBuilder, Url,
@@ -81,8 +81,8 @@ async fn requests_are_traced_without_secrets() {
     mock.json(json!({}));
     client
         .request(
-            kibana_rs::http::Method::GET,
-            kibana_rs::Scope::Global,
+            security_client_rs::http::Method::GET,
+            security_client_rs::Scope::Global,
             &["api", "status"],
         )
         .send()
@@ -92,7 +92,8 @@ async fn requests_are_traced_without_secrets() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let closed = format!("http://{}", listener.local_addr().unwrap());
     drop(listener);
-    let unreachable = Kibana::new(kibana_rs::http::Transport::single_node(&closed).unwrap());
+    let unreachable =
+        Kibana::new(security_client_rs::http::Transport::single_node(&closed).unwrap());
     let _ = unreachable
         .cases()
         .find()
@@ -108,16 +109,19 @@ async fn requests_are_traced_without_secrets() {
         let error = client
             .transport()
             .send::<()>(
-                kibana_rs::http::Method::GET,
+                security_client_rs::http::Method::GET,
                 path,
-                kibana_rs::http::headers::HeaderMap::default(),
+                security_client_rs::http::headers::HeaderMap::default(),
                 None,
                 None,
                 None,
             )
             .await
             .unwrap_err();
-        assert!(matches!(error, kibana_rs::Error::InvalidRequest(_)));
+        assert!(matches!(
+            error,
+            security_client_rs::Error::InvalidRequest(_)
+        ));
     }
 
     let output = String::from_utf8(captured.0.lock().unwrap().clone()).unwrap();

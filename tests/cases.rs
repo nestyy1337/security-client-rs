@@ -1,7 +1,7 @@
 mod common;
 
 use common::Mock;
-use kibana_rs::{
+use security_client_rs::{
     SortOrder,
     cases::{CaseComment, CasePatch, CaseStatus, NewCase, SECURITY_OWNER},
     security::Severity,
@@ -29,7 +29,7 @@ async fn extra_patch_fields_preserve_case_identity_and_version() {
     for key in ["id", "version"] {
         assert!(matches!(
             CasePatch::new("a", "v1").field(key, "replacement"),
-            Err(kibana_rs::Error::InvalidRequest(_))
+            Err(security_client_rs::Error::InvalidRequest(_))
         ));
     }
 }

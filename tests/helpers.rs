@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use common::Mock;
 use futures_util::TryStreamExt;
-use kibana_rs::{
+use security_client_rs::{
     Error,
     fleet::{ActionStatus, UploadStatus},
     pagination::Page,

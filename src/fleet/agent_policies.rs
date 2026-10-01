@@ -57,7 +57,7 @@ impl AgentPolicy {
     /// Renaming retains the timeout and leaves other optional settings unset:
     ///
     /// ```
-    /// use kibana_rs::fleet::AgentPolicy;
+    /// use security_client_rs::fleet::AgentPolicy;
     /// use serde_json::{from_value, json, to_value};
     ///
     /// let policy: AgentPolicy = from_value(json!({
@@ -74,7 +74,7 @@ impl AgentPolicy {
     /// To apply an edit:
     ///
     /// ```no_run
-    /// # async fn rename(client: &kibana_rs::Kibana) -> kibana_rs::Result<()> {
+    /// # async fn rename(client: &security_client_rs::Kibana) -> security_client_rs::Result<()> {
     /// let fleet = client.fleet();
     /// let policy = fleet.get_agent_policy("policy-id").send().await?.json().await?.item;
     /// let edit = policy.edit()?.name("SOC endpoints").clear_data_output_id();
@@ -172,7 +172,7 @@ impl NewAgentPolicy {
     /// On update, omission keeps the existing selection; null clears it.
     ///
     /// ```
-    /// use kibana_rs::fleet::NewAgentPolicy;
+    /// use security_client_rs::fleet::NewAgentPolicy;
     /// use serde_json::{json, to_value};
     ///
     /// let policy = NewAgentPolicy::new("SOC endpoints", "default");

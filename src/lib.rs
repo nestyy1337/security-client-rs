@@ -5,10 +5,10 @@
 //! namespaces; every endpoint is a builder that is configured and then `send`s.
 //!
 //! ```no_run
-//! use kibana_rs::{Kibana, http::{Credentials, Transport, TransportBuilder, Url}};
-//! use kibana_rs::security::{QueryRule, Severity};
+//! use security_client_rs::{Kibana, http::{Credentials, Transport, TransportBuilder, Url}};
+//! use security_client_rs::security::{QueryRule, Severity};
 //!
-//! # async fn run() -> kibana_rs::Result<()> {
+//! # async fn run() -> security_client_rs::Result<()> {
 //! let transport = TransportBuilder::new(Url::parse("https://kibana.example:5601").unwrap())
 //!     .auth(Credentials::EncodedApiKey("base64-key".into()))
 //!     .build()?;

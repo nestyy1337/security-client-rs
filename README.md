@@ -1,4 +1,4 @@
-# kibana-rs
+# security-client-rs
 
 An async Rust client for the Kibana HTTP API, focused on security operations: detection rules, exception lists, cases, Fleet, spaces and roles.
 
@@ -25,14 +25,14 @@ Routes without a named builder are reachable through `Kibana::request`.
 
 ```toml
 [dependencies]
-kibana-rs = "0.1"
+security-client-rs = "0.1"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
 ```
 
 ## Usage
 
 ```rust
-use kibana_rs::{
+use security_client_rs::{
     Kibana,
     http::{Credentials, TransportBuilder, Url},
     security::{QueryRule, Severity},
@@ -129,10 +129,10 @@ The client does not retry, because whether a retry is safe depends on the reques
 
 ## Tracing
 
-The optional `tracing` feature emits debug events under the `kibana_rs` target with the endpoint name, method, path, status, duration and any `X-Opaque-Id` header. A request emits one event when successful response headers arrive or when it fails, and reading a successful body with `bytes`, `text` or `json` emits a second event when the body is complete, interrupted or too large. Streamed or unread bodies emit no body event. A response that does not match the expected type is also reported. Query values, bodies, credentials and other headers are never recorded.
+The optional `tracing` feature emits debug events under the `security_client_rs` target with the endpoint name, method, path, status, duration and any `X-Opaque-Id` header. A request emits one event when successful response headers arrive or when it fails, and reading a successful body with `bytes`, `text` or `json` emits a second event when the body is complete, interrupted or too large. Streamed or unread bodies emit no body event. A response that does not match the expected type is also reported. Query values, bodies, credentials and other headers are never recorded.
 
 ```toml
-kibana-rs = { version = "0.1", features = ["tracing"] }
+security-client-rs = { version = "0.1", features = ["tracing"] }
 ```
 
 ## Compatibility
@@ -173,7 +173,7 @@ Prefix development commands with `nix develop -c` when using that environment.
 
 ## License
 
-Copyright (c) 2026 kibana-rs contributors.
+Copyright (c) 2026 security-client-rs contributors.
 
 Licensed under the [Apache License 2.0](LICENSE-APACHE).
 
