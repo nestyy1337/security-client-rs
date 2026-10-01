@@ -126,6 +126,8 @@ pub struct NewAgentPolicy {
     description: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     monitoring_enabled: Option<Vec<String>>,
+    /// Omitted, `null` for Fleet's default output, or an output ID.
+    #[allow(clippy::option_option)]
     #[serde(skip_serializing_if = "Option::is_none")]
     data_output_id: Option<Option<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]

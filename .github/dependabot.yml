@@ -1,0 +1,23 @@
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      gha-bump:
+        applies-to: version-updates
+        update-types:
+          - "patch"
+          - "minor"
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: daily
+    ignore:
+      - dependency-name: "*"
+        # Consumers of a library resolve their own patch and minor versions, so only
+        # major bumps need a change here.
+        update-types:
+          - "version-update:semver-patch"
+          - "version-update:semver-minor"

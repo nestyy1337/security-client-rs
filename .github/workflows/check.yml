@@ -1,38 +1,120 @@
-name: Check
+# Static checks on every PR and every push to main, adapted from
+# https://github.com/jonhoo/rust-ci-conf:
+# - fmt, clippy (stable and beta), docs as docs.rs builds them
+# - hack: every feature combination compiles, so features stay additive
+# - msrv: the `rust-version` in Cargo.toml is honest
+# - package, deny: the crate packages and its dependency tree passes cargo-deny
+# - contracts: API coverage and pinned schema contracts against upstream Kibana
+permissions:
+  contents: read
 on:
   push:
+    branches: [main]
   pull_request:
+# Pushing to a PR branch cancels the run still in progress for it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+name: check
 jobs:
-  coverage:
+  fmt:
     runs-on: ubuntu-latest
+    name: stable / fmt
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v6
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+          components: rustfmt
+      - name: cargo fmt --check
+        run: cargo fmt --check
+  clippy:
+    runs-on: ubuntu-latest
+    name: ${{ matrix.toolchain }} / clippy
+    strategy:
+      fail-fast: false
+      matrix:
+        # Beta gives early warning of lints that are about to reach stable.
+        toolchain: [stable, beta]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+      - name: Install ${{ matrix.toolchain }}
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: ${{ matrix.toolchain }}
+          components: clippy
+      - name: cargo clippy
+        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+  doc:
+    # Nightly, like docs.rs, so `doc(cfg)` and similar work.
+    runs-on: ubuntu-latest
+    name: nightly / doc
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+      - name: Install nightly
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: nightly
+      - name: Install cargo-docs-rs
+        uses: dtolnay/install@982daea0f5d846abc3c83e01a6a1d73c040047c1 # branch=cargo-docs-rs
+      - name: cargo docs-rs
+        run: cargo docs-rs
+  hack:
+    runs-on: ubuntu-latest
+    name: ubuntu / stable / features
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+      - name: cargo install cargo-hack
+        uses: taiki-e/install-action@065d6a08a14e61e89fb0a4c10eecdbdef39c7d8e # tag=v2.85.4
+        with:
+          tool: cargo-hack
+      # No target specifier, see https://github.com/jonhoo/rust-ci-conf/pull/4
+      - name: cargo hack
+        run: cargo hack --feature-powerset check --locked
+  msrv:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # Keep in step with `rust-version` in Cargo.toml.
+        msrv: ["1.88"]
+    name: ubuntu / ${{ matrix.msrv }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+      - name: Install ${{ matrix.msrv }}
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: ${{ matrix.msrv }}
+      - name: cargo +${{ matrix.msrv }} test
+        run: cargo test --locked --all-targets --all-features
+  package:
+    runs-on: ubuntu-latest
+    name: stable / package
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+      - name: Install stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+      - name: cargo package
+        run: cargo package --locked
+  deny:
+    runs-on: ubuntu-latest
+    name: cargo-deny
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # tag=v2.1.1
+  contracts:
+    runs-on: ubuntu-latest
+    name: api coverage / contracts
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # tag=v10.2.0
       - run: uv run --with PyYAML==6.0.3 --with openapi-schema-validator==0.9.0 --with jsonschema==4.26.0 python -m unittest discover -s tools -p 'test_*.py'
       - run: uv run tools/api_coverage.py --fetch --check
       - run: uv run tools/schema_contracts.py --fetch --check
       - run: uv run python -m unittest discover -s tests/deployment -p 'test_*.py'
-  rust:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-      - run: cargo test --locked --workspace --all-targets --all-features
-      - run: cargo test --locked --doc
-      - run: cargo package --locked
-  msrv:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # Keep in step with `rust-version` in Cargo.toml.
-      - uses: dtolnay/rust-toolchain@1.88
-      - run: cargo test --locked --workspace --all-targets --all-features
-  dependencies:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2

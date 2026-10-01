@@ -76,6 +76,7 @@ impl Mock {
         self.reply_with(status, vec![], body);
     }
 
+    #[allow(clippy::needless_pass_by_value)]
     pub fn json(&self, body: Value) {
         self.reply_with(
             200,
@@ -191,6 +192,7 @@ impl Recorded {
     }
 
     /// Asserts the JSON body.
+    #[allow(clippy::needless_pass_by_value)]
     pub fn body(&self, expected: Value) -> &Self {
         assert_eq!(self.json(), expected, "body for {}", self.path);
         self

@@ -46,7 +46,7 @@ fn status<T>(result: Result<T>) -> Option<StatusCode> {
 }
 
 fn ids(agents: &[&str]) -> AgentSelection {
-    AgentSelection::Ids(agents.iter().map(|id| id.to_string()).collect())
+    AgentSelection::Ids(agents.iter().map(ToString::to_string).collect())
 }
 
 #[tokio::test]

@@ -412,7 +412,7 @@ async fn fleet_enrollment_key_lifecycle_and_pagination() {
                 .await?
                 .item;
             assert!(key.active);
-            assert!(!key.api_key.is_empty());
+            assert!(!key.api_key.is_empty(), "enrollment API key is empty");
             assert!(key.expire_at.is_some());
             assert!(!format!("{key:?}").contains(&key.api_key));
             let fetched = fleet

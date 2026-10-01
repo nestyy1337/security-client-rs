@@ -1,5 +1,6 @@
 mod common;
 
+use std::fmt::Write as _;
 use std::time::Duration;
 
 use common::Mock;
@@ -251,6 +252,14 @@ async fn response_limits_and_decode_errors_are_distinct() {
 
 #[tokio::test]
 async fn responses_expose_status_headers_and_alternative_decoding() {
+    #[derive(serde::Deserialize)]
+    struct Version {
+        number: String,
+    }
+    #[derive(serde::Deserialize)]
+    struct Status {
+        version: Version,
+    }
     let mock = Mock::start().await;
     mock.reply_with(
         201,
@@ -261,14 +270,6 @@ async fn responses_expose_status_headers_and_alternative_decoding() {
     assert_eq!(response.status_code(), StatusCode::CREATED);
     assert_eq!(response.headers()["x-trace"], "abc");
     assert_eq!(response.content_length(), Some(30));
-    #[derive(serde::Deserialize)]
-    struct Version {
-        number: String,
-    }
-    #[derive(serde::Deserialize)]
-    struct Status {
-        version: Version,
-    }
     assert_eq!(
         response.json_as::<Status>().await.unwrap().version.number,
         "9.5.4"
@@ -869,7 +870,7 @@ async fn interrupted_streams_keep_response_context_and_delivered_byte_counts() {
         let mut chain = format!("{error} {error:?}");
         let mut source = std::error::Error::source(&error);
         while let Some(next) = source {
-            chain.push_str(&format!(" {next} {next:?}"));
+            write!(chain, " {next} {next:?}").unwrap();
             source = next.source();
         }
         for secret in ["header-secret", "body-secret", "query-secret"] {
@@ -934,7 +935,7 @@ async fn decode_errors_and_response_debug_do_not_reveal_response_or_query_values
     let mut chain = format!("{error} {error:?}");
     let mut source = std::error::Error::source(&error);
     while let Some(next) = source {
-        chain.push_str(&format!(" {next} {next:?}"));
+        write!(chain, " {next} {next:?}").unwrap();
         source = next.source();
     }
     assert!(!chain.contains("response-secret"), "{chain}");

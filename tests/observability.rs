@@ -110,7 +110,7 @@ async fn requests_are_traced_without_secrets() {
             .send::<()>(
                 kibana_rs::http::Method::GET,
                 path,
-                Default::default(),
+                kibana_rs::http::headers::HeaderMap::default(),
                 None,
                 None,
                 None,

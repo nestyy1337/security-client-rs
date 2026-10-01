@@ -184,9 +184,9 @@ mod tests {
             fraction: f64,
         }
         let numbers = Numbers {
-            positive: u64::MAX as u128 + 2,
-            negative: i64::MIN as i128 - 2,
-            fraction: 2.291712365432881e-9,
+            positive: u128::from(u64::MAX) + 2,
+            negative: i128::from(i64::MIN) - 2,
+            fraction: 2.291_712_365_432_881e-9,
         };
         let Content::Json(bytes) = Body::json(&numbers).unwrap().0 else {
             panic!("expected JSON");

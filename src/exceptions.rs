@@ -732,10 +732,10 @@ impl ItemEdit {
     }
 
     /// Replaces every entry. Entries are combined with AND.
-    pub fn entries(mut self, entries: Vec<Entry>) -> Self {
+    pub fn entries(mut self, entries: impl IntoIterator<Item = Entry>) -> Self {
         self.entries = entries
-            .iter()
-            .map(|entry| serde_json::to_value(entry).expect("entries serialize as JSON"))
+            .into_iter()
+            .map(|entry| serde_json::to_value(&entry).expect("entries serialize as JSON"))
             .collect();
         self
     }

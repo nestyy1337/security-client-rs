@@ -6,7 +6,7 @@ use crate::{
     poll::{self, PollOptions, WaitOutcome},
 };
 
-impl<'a> Fleet<'a> {
+impl Fleet<'_> {
     /// Waits until an agent action finishes.
     ///
     /// Kibana has no lookup by action ID, so each check searches progressively

@@ -134,7 +134,7 @@ async fn waiting_for_an_action_returns_its_final_state_or_the_last_seen_state() 
     let options = PollOptions::new(Duration::from_millis(60)).interval(Duration::from_millis(10));
     match fleet.fleet().wait_for_action("act", options).await.unwrap() {
         WaitOutcome::TimedOut { last: Some(last) } => {
-            assert_eq!(last.status, ActionStatus::InProgress)
+            assert_eq!(last.status, ActionStatus::InProgress);
         }
         other => panic!("expected a timeout with the last state, got {other:?}"),
     }
@@ -199,7 +199,7 @@ async fn waiting_for_an_action_searches_larger_windows_and_reports_eviction() {
             assert_eq!(
                 (last.status, last.nb_agents_failed),
                 (ActionStatus::InProgress, 1)
-            )
+            );
         }
         other => panic!("expected the action to vanish, got {other:?}"),
     }
