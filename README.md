@@ -171,10 +171,6 @@ builders and response decoding. These fixtures cover selected workflows.
 A Nix flake provides the toolchain for those who use it.
 Prefix development commands with `nix develop -c` when using that environment.
 
-[Release steps](docs/releasing.md) cover package verification, version tags and
-publication. Before registry publication, use a Git dependency pinned with `rev`
-to the reviewed commit.
-
 ## License
 
 Copyright (c) 2026 kibana-rs contributors.
