@@ -1,0 +1,42 @@
+# Rolling checks, adapted from https://github.com/jonhoo/rust-ci-conf. The crate can break
+# without any change here: a new nightly, or new releases of its dependencies.
+permissions:
+  contents: read
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '7 7 * * *'
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+name: rolling
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    name: ubuntu / nightly
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+      - name: Install nightly
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: nightly
+      - name: cargo test --locked
+        run: cargo test --locked --all-features --all-targets
+  update:
+    # Consumers build with the newest semver-compatible dependencies, not our lockfile.
+    runs-on: ubuntu-latest
+    name: ubuntu / beta / updated
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+      - name: Install beta
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: beta
+      - name: cargo update
+        run: cargo update
+      - name: cargo test
+        run: cargo test --locked --all-features --all-targets
+        env:
+          RUSTFLAGS: -D deprecated

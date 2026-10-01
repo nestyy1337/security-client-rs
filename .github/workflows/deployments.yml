@@ -10,6 +10,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
 jobs:
   deployment:
     runs-on: ubuntu-24.04
@@ -19,23 +23,25 @@ jobs:
       matrix:
         profile: [9.5.4-basic, 9.4.7-basic]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
       # Image extraction otherwise pushes the runner past Elasticsearch's disk watermark,
       # which blocks shard allocation.
       - name: Make room for deployment images
         run: |
           sudo rm -rf /usr/local/lib/android /usr/share/dotnet
           df -h /
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: astral-sh/setup-uv@v6
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # tag=v10.2.0
         with:
           python-version: '3.13'
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # tag=v2.9.2
       - name: Test deployment
         run: uv run python -u tests/deployment/run.py --profile '${{ matrix.profile }}' --artifacts '${{ runner.temp }}/deployment-results'
       - name: Retain results, including failures
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
         with:
           name: deployment-${{ matrix.profile }}
           path: ${{ runner.temp }}/deployment-results
