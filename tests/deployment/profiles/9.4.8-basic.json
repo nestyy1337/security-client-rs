@@ -1,11 +1,11 @@
 {
-  "version": "9.5.4",
+  "version": "9.4.8",
   "license": "basic",
   "platform": "linux/amd64",
   "images": {
-    "ES_IMAGE": "docker.elastic.co/elasticsearch/elasticsearch@sha256:82ac14f43fe701992e601f4cc81e1c0d7dbc5a2576d8cd736006452925df4026",
-    "KIBANA_IMAGE": "docker.elastic.co/kibana/kibana@sha256:b1b4cea273350ffcb67292d7b90dd034598c1627bfa3cd0783315e9237dbe737",
-    "AGENT_IMAGE": "docker.elastic.co/elastic-agent/elastic-agent@sha256:faf12795c91f90334985c83a77756bed9e9d7325f622f410a2ae10890a18f4cc",
+    "ES_IMAGE": "docker.elastic.co/elasticsearch/elasticsearch@sha256:fb7f2d0df199b3ea14a700e88a0b701d502cb44409ece3e1540b1dc1c5d5c403",
+    "KIBANA_IMAGE": "docker.elastic.co/kibana/kibana@sha256:52dba41a8949f3e090c92e4d7bbbf8ba72da220c5651662b94395850d1b29d93",
+    "AGENT_IMAGE": "docker.elastic.co/elastic-agent/elastic-agent@sha256:e7f7bc7758062df424587b4d7885ae8ddacf608708ff7afd588cd3f2b89ba496",
     "EPR_IMAGE": "docker.elastic.co/package-registry/package-registry@sha256:d1123817423c54ef11d9b42645e0c076d67fe4e7898a3295172b67ce9f78767a",
     "GATEWAY_IMAGE": "docker.io/library/haproxy@sha256:686211da34aba401814bb109c813db6a579491bc8753bfd81b78cce7d1e02f7c"
   },

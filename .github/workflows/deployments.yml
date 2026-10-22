@@ -21,7 +21,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [9.5.4-basic, 9.4.7-basic]
+        profile: [9.5.5-basic, 9.4.8-basic]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
       # Image extraction otherwise pushes the runner past Elasticsearch's disk watermark,

@@ -3,8 +3,8 @@
 `run.py` starts a disposable Elastic Stack, runs the ignored tests in `tests/live.rs` and `tests/deployment.rs` against it, and removes everything afterwards.
 
 ```sh
-uv run python -u tests/deployment/run.py --profile 9.5.4-basic
-uv run python -u tests/deployment/run.py --profile 9.4.7-basic
+uv run python -u tests/deployment/run.py --profile 9.5.5-basic
+uv run python -u tests/deployment/run.py --profile 9.4.8-basic
 ```
 
 Requirements: Linux x86_64, Docker with Compose v2, a Rust toolchain, uv, OpenSSL and curl. Plan for 8 GiB of free memory and 15 GiB of disk. The runner uses `DOCKER_HOST` or the user's rootless Docker socket.
@@ -36,7 +36,7 @@ Each file in `profiles/` pins every container image by digest and every package 
 
 ## Results
 
-Each run writes a JSON report, per-scenario logs, service logs and a cleanup log under `$XDG_STATE_HOME/security-client-tests`, or the directory given with `--artifacts`. Credentials are redacted. CI runs both profiles and keeps artifacts for 14 days.
+Each run writes a JSON report, per-scenario logs, service logs and a cleanup log under `$XDG_STATE_HOME/security-client-tests`, or the directory given with `--artifacts`. Credentials are redacted. CI runs every profile and keeps artifacts for 14 days.
 
 ## Limits
 

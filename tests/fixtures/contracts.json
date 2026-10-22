@@ -2,8 +2,8 @@
   "query-create": {
     "wrapper": "security.create_rule",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "request": {
       "type": "query",
@@ -26,8 +26,8 @@
   "query-response": {
     "wrapper": "security.get_rule",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "response": {
       "status": 200,
@@ -88,8 +88,8 @@
   "query-patch": {
     "wrapper": "security.patch_rule",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "request": {
       "id": "11111111-1111-4111-8111-111111111111",
@@ -99,8 +99,8 @@
   "rule-import-partial": {
     "wrapper": "security.import_rules",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "response": {
       "status": 200,
@@ -138,8 +138,8 @@
   "case-update": {
     "wrapper": "cases.update",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "request": {
       "cases": [
@@ -206,7 +206,7 @@
   "case-extended-fields": {
     "wrapper": "cases.update",
     "versions": [
-      "9.5.4"
+      "9.5.5"
     ],
     "request": {
       "cases": [
@@ -223,8 +223,8 @@
   "exception-item-edit": {
     "wrapper": "exceptions.update_item",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "request": {
       "id": "fixture-item",
@@ -278,8 +278,8 @@
   "agent-policy-clear-output": {
     "wrapper": "fleet.update_agent_policy",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "request": {
       "name": "SOC endpoints",
@@ -312,8 +312,8 @@
   "package-policy-full": {
     "wrapper": "fleet.get_package_policy",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "response": {
       "status": 200,
@@ -356,8 +356,8 @@
   "package-policy-edit": {
     "wrapper": "fleet.update_package_policy",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "request": {
       "name": "system-1",
@@ -386,8 +386,8 @@
   "package-policy-simplified": {
     "wrapper": "fleet.get_package_policy",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "response": {
       "status": 200,
@@ -425,8 +425,8 @@
   "agent-null-revision": {
     "wrapper": "fleet.get_agent",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "response": {
       "status": 200,
@@ -459,8 +459,8 @@
   "action-status": {
     "wrapper": "fleet.agent_action_status",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "response": {
       "status": 200,
@@ -484,8 +484,8 @@
   "space-update": {
     "wrapper": "spaces.update",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "request": {
       "id": "soc",
@@ -498,8 +498,8 @@
   "role-definition": {
     "wrapper": "roles.put",
     "versions": [
-      "9.4.7",
-      "9.5.4"
+      "9.4.8",
+      "9.5.5"
     ],
     "request": {
       "elasticsearch": {
@@ -525,7 +525,7 @@
         "path": "/kibana/0/base",
         "kind": "ambiguous_one_of",
         "reason": "The two base-privilege array alternatives have identical constraints, so valid arrays match both",
-        "source": "https://github.com/elastic/kibana/blob/v9.5.4/oas_docs/output/kibana.yaml"
+        "source": "https://github.com/elastic/kibana/blob/v9.5.5/oas_docs/output/kibana.yaml"
       }
     ]
   }

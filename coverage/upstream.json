@@ -1,14 +1,14 @@
 {
-  "version": "9.5.4",
+  "version": "9.5.5",
   "deployment": "traditional",
-  "url": "https://raw.githubusercontent.com/elastic/kibana/v9.5.4/oas_docs/output/kibana.yaml",
-  "sha256": "a5dd0f2a0fa30f2bdcba6b42c712b9bfcd89f22aef29c9bf5285328f014279d9",
+  "url": "https://raw.githubusercontent.com/elastic/kibana/v9.5.5/oas_docs/output/kibana.yaml",
+  "sha256": "35a50b479075c47075eecfb7d04089847b9d697fa38be36cfdbd7560fb3c9d4f",
   "comparisons": [
     {
-      "version": "9.4.7",
+      "version": "9.4.8",
       "deployment": "traditional",
-      "url": "https://raw.githubusercontent.com/elastic/kibana/v9.4.7/oas_docs/output/kibana.yaml",
-      "sha256": "4746196c160554bc3dac4800d0f19f4848b660ad8a4f1b1be7c0eef55299d660"
+      "url": "https://raw.githubusercontent.com/elastic/kibana/v9.4.8/oas_docs/output/kibana.yaml",
+      "sha256": "f7870fa85e9cb3c9a386cd49ff7a2903db43e1b1584605783c910adf930f069d"
     }
   ]
 }

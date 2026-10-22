@@ -14,7 +14,7 @@ class RunnerTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.path = Path(self.temporary.name)
-        self.profile = json.loads((HERE / "profiles/9.5.4-basic.json").read_text())
+        self.profile = json.loads((HERE / "profiles/9.5.5-basic.json").read_text())
         self.deployment = Deployment(self.profile, self.path, self.path)
         self.deployment.binaries = {"live": "/unused"}
 
@@ -75,7 +75,7 @@ class RunnerTests(unittest.TestCase):
         self.deployment.api = Mock(return_value={"status": {"overall": {"level": "available"}}})
         with self.assertRaisesRegex(RuntimeError, "not fully authenticated"):
             self.deployment.ready_kibana()
-        full = {"status": {"overall": {"level": "available"}}, "version": {"number": "9.5.4"}}
+        full = {"status": {"overall": {"level": "available"}}, "version": {"number": self.profile["version"]}}
         self.deployment.api = Mock(side_effect=[full, RuntimeError("HTTP 503: licensing unavailable")])
         with self.assertRaisesRegex(RuntimeError, "licensing unavailable"):
             self.deployment.ready_kibana()

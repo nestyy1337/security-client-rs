@@ -8,10 +8,10 @@ types, properties, required fields, enums, nullable flags, defaults, constraints
 Changes require review; this comparison does not classify them as breaking or certify complete client support.
 Long values are abbreviated below; fingerprints cover their complete normalized contracts.
 
-- [Kibana 9.4.7](https://raw.githubusercontent.com/elastic/kibana/v9.4.7/oas_docs/output/kibana.yaml), SHA-256 `4746196c160554bc3dac4800d0f19f4848b660ad8a4f1b1be7c0eef55299d660`.
-- [Kibana 9.5.4](https://raw.githubusercontent.com/elastic/kibana/v9.5.4/oas_docs/output/kibana.yaml), SHA-256 `a5dd0f2a0fa30f2bdcba6b42c712b9bfcd89f22aef29c9bf5285328f014279d9`.
+- [Kibana 9.4.8](https://raw.githubusercontent.com/elastic/kibana/v9.4.8/oas_docs/output/kibana.yaml), SHA-256 `f7870fa85e9cb3c9a386cd49ff7a2903db43e1b1584605783c910adf930f069d`.
+- [Kibana 9.5.5](https://raw.githubusercontent.com/elastic/kibana/v9.5.5/oas_docs/output/kibana.yaml), SHA-256 `35a50b479075c47075eecfb7d04089847b9d697fa38be36cfdbd7560fb3c9d4f`.
 
-## 9.4.7 to 9.5.4
+## 9.4.8 to 9.5.5
 
 50 of 78 named operations have schema changes.
 
@@ -1294,21 +1294,21 @@ They cover selected workflows, not every endpoint or schema branch.
 
 | Fixture | Builder | Versions | Request | Response |
 | --- | --- | --- | --- | --- |
-| `action-status` | `fleet.agent_action_status` | 9.4.7, 9.5.4 | - | 200 |
-| `agent-null-revision` | `fleet.get_agent` | 9.4.7, 9.5.4 | - | 200 |
-| `agent-policy-clear-output` | `fleet.update_agent_policy` | 9.4.7, 9.5.4 | JSON | 200 |
-| `case-extended-fields` | `cases.update` | 9.5.4 | JSON | - |
-| `case-update` | `cases.update` | 9.4.7, 9.5.4 | JSON | 200 |
-| `exception-item-edit` | `exceptions.update_item` | 9.4.7, 9.5.4 | JSON | 200 |
-| `package-policy-edit` | `fleet.update_package_policy` | 9.4.7, 9.5.4 | JSON | - |
-| `package-policy-full` | `fleet.get_package_policy` | 9.4.7, 9.5.4 | - | 200 |
-| `package-policy-simplified` | `fleet.get_package_policy` | 9.4.7, 9.5.4 | - | 200 |
-| `query-create` | `security.create_rule` | 9.4.7, 9.5.4 | JSON | - |
-| `query-patch` | `security.patch_rule` | 9.4.7, 9.5.4 | JSON | - |
-| `query-response` | `security.get_rule` | 9.4.7, 9.5.4 | - | 200 |
-| `role-definition` | `roles.put` | 9.4.7, 9.5.4 | JSON | - |
-| `rule-import-partial` | `security.import_rules` | 9.4.7, 9.5.4 | - | 200 |
-| `space-update` | `spaces.update` | 9.4.7, 9.5.4 | JSON | - |
+| `action-status` | `fleet.agent_action_status` | 9.4.8, 9.5.5 | - | 200 |
+| `agent-null-revision` | `fleet.get_agent` | 9.4.8, 9.5.5 | - | 200 |
+| `agent-policy-clear-output` | `fleet.update_agent_policy` | 9.4.8, 9.5.5 | JSON | 200 |
+| `case-extended-fields` | `cases.update` | 9.5.5 | JSON | - |
+| `case-update` | `cases.update` | 9.4.8, 9.5.5 | JSON | 200 |
+| `exception-item-edit` | `exceptions.update_item` | 9.4.8, 9.5.5 | JSON | 200 |
+| `package-policy-edit` | `fleet.update_package_policy` | 9.4.8, 9.5.5 | JSON | - |
+| `package-policy-full` | `fleet.get_package_policy` | 9.4.8, 9.5.5 | - | 200 |
+| `package-policy-simplified` | `fleet.get_package_policy` | 9.4.8, 9.5.5 | - | 200 |
+| `query-create` | `security.create_rule` | 9.4.8, 9.5.5 | JSON | - |
+| `query-patch` | `security.patch_rule` | 9.4.8, 9.5.5 | JSON | - |
+| `query-response` | `security.get_rule` | 9.4.8, 9.5.5 | - | 200 |
+| `role-definition` | `roles.put` | 9.4.8, 9.5.5 | JSON | - |
+| `rule-import-partial` | `security.import_rules` | 9.4.8, 9.5.5 | - | 200 |
+| `space-update` | `spaces.update` | 9.4.8, 9.5.5 | JSON | - |
 
 ## Validation limits
 
@@ -1317,5 +1317,5 @@ It validates the alternatives directly instead of using discriminator shortcuts:
 discriminator omits the mapping from `internal` to `Security_Detections_API_InternalRuleSource`.
 Discriminator metadata is still included in the schema fingerprints and comparison.
 
-- `role-definition` request `/kibana/0/base`: The two base-privilege array alternatives have identical constraints, so valid arrays match both [Upstream schema](https://github.com/elastic/kibana/blob/v9.5.4/oas_docs/output/kibana.yaml). The exception applies only while multiple alternatives match;
+- `role-definition` request `/kibana/0/base`: The two base-privilege array alternatives have identical constraints, so valid arrays match both [Upstream schema](https://github.com/elastic/kibana/blob/v9.5.5/oas_docs/output/kibana.yaml). The exception applies only while multiple alternatives match;
   a missing match, another error or an obsolete exception fails the check.

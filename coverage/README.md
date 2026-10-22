@@ -25,7 +25,7 @@ Optional `live_evidence` entries name a `file.rs:scenario` and a reviewed outcom
 call still exist; reviewing the assertions is a human task. Unreviewed live calls
 remain labeled `called`. These labels do not imply a passing deployment run.
 The [supported workflow review](../docs/supported-contracts.md) records the
-request/response subsets checked against both supported versions. The inventory
+request/response subsets checked against the supported versions. The inventory
 tool checks routes and test references; the schema check below checks contracts.
 
 Builders are found by convention: a public namespace method taking `&self` that builds exactly one `.request(Method::X, Scope::Y, &[...])`. Any other public `&self` method in an endpoint module fails the check unless it is listed in `NON_ENDPOINTS`.

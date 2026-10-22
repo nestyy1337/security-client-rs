@@ -12,7 +12,13 @@ test references.
 Live validation on 2026-09-30 passed all ten scenarios in each Basic deployment
 profile, including cleanup. The ignored tests need the
 [deployment runner](../tests/deployment/README.md); ordinary `cargo test` does
-not execute them. A release needs fresh passing reports for both profiles.
+not execute them. A release needs fresh passing reports for every profile.
+
+On 2026-10-22 the supported targets moved to 9.5.5 and 9.4.8. For the named
+operations, their bundles differ from 9.5.4 and 9.4.7 only by a 1000-entry limit
+on the `kibana` array in role update requests. Live validation on 2026-10-22
+passed all ten scenarios in both profiles, including cleanup. The workflow notes
+below cite the 9.5.4 and 9.4.7 sources they were reviewed against.
 
 ## Query detection rules
 

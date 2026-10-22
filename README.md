@@ -7,7 +7,7 @@ The project is pre-1.0. It is not affiliated with or supported by Elastic.
 ## Coverage
 
 <!-- BEGIN API COVERAGE -->
-78 of the 663 operations in the Kibana 9.5.4 OpenAPI bundle have named builders. See the [coverage report](docs/api-coverage.md) for each builder's route and known limits.
+78 of the 663 operations in the Kibana 9.5.5 OpenAPI bundle have named builders. See the [coverage report](docs/api-coverage.md) for each builder's route and known limits.
 <!-- END API COVERAGE -->
 
 | Namespace | Endpoints |
@@ -137,8 +137,8 @@ security-client-rs = { version = "0.1", features = ["tracing"] }
 
 ## Compatibility
 
-The initial supported targets are self-managed Kibana 9.5.4 and 9.4.7 with a Basic
-license on Linux x86_64. Each release must pass both pinned deployment profiles.
+The supported targets are self-managed Kibana 9.5.5 and 9.4.8 with a Basic
+license on Linux x86_64. Each release must pass every pinned deployment profile.
 Other patches within those minor versions are expected to be similar but are
 not certified by those runs. 8.x, Serverless, Elastic Cloud, paid features and
 stack upgrades are outside the tested scope. The minimum Rust version is 1.88.
