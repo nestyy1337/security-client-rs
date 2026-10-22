@@ -67,6 +67,8 @@ def validate_profile(profile):
 class Deployment:
     def __init__(self, profile, directory, artifacts):
         self.profile = profile
+        # Snapshot Kibana and Agent report the release number; Elasticsearch keeps the suffix.
+        self.release = profile["version"].removesuffix("-SNAPSHOT")
         self.directory = directory
         self.artifacts = artifacts
         self.project = "krs-test-" + uuid.uuid4().hex[:12]
@@ -151,7 +153,7 @@ class Deployment:
         status = self.api("kibana", "/api/status")
         version = status.get("version", {}).get("number")
         level = status.get("status", {}).get("overall", {}).get("level")
-        if version and version != self.profile["version"]:
+        if version and version != self.release:
             raise RuntimeError(f"Kibana version {version} differs from profile")
         if not version or level != "available":
             raise RuntimeError(f"Kibana not fully authenticated and available: version={version}, level={level}")
@@ -249,7 +251,7 @@ class Deployment:
             "KIBANA_URL": self.urls["kibana"], "KIBANA_USERNAME": "elastic", "KIBANA_PASSWORD": self.password,
             "KIBANA_CA_CERT": str(self.directory / "certs/ca.crt"), "ELASTICSEARCH_URL": self.urls["es"],
             "KIBANA_TEST_SYSTEM_VERSION": self.profile["packages"]["system"],
-            "KIBANA_TEST_VERSION": self.profile["version"],
+            "KIBANA_TEST_VERSION": self.release,
         })
 
     def identities(self):
@@ -303,7 +305,7 @@ class Deployment:
         agent = self.wait("managed Agent check-in", lambda: next((a for a in self.api("kibana", "/api/fleet/agents")["items"] if a.get("policy_id") == "fixture-agent" and a.get("status") == "online"), None), timeout=240)
         peer = self.wait("peer Agent check-in", lambda: next((a for a in self.api("kibana", "/api/fleet/agents")["items"] if a.get("policy_id") == "fixture-agent-target" and a.get("status") == "online"), None), timeout=240)
         for enrolled in [server, agent, peer]:
-            if enrolled["local_metadata"]["elastic"]["agent"]["version"] != self.profile["version"]:
+            if enrolled["local_metadata"]["elastic"]["agent"]["version"] != self.release:
                 raise RuntimeError("Enrolled Agent version differs from profile")
         self.compose("restart", "agent")
         container = self.compose("ps", "-q", "agent").stdout.strip()
@@ -346,15 +348,18 @@ class Deployment:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", required=True, choices=[p.stem for p in (HERE / "profiles").glob("*.json")])
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--profile", choices=[p.stem for p in (HERE / "profiles").glob("*.json")])
+    source.add_argument("--profile-file", type=Path, help="Profile outside profiles/, such as a generated snapshot profile")
     parser.add_argument("--artifacts", type=Path, default=Path(os.environ.get("XDG_STATE_HOME", Path.home() / ".local/state")) / "security-client-tests")
     args = parser.parse_args()
     if platform.system() != "Linux" or platform.machine() != "x86_64":
         raise RuntimeError("These initial locked profiles require Linux x86_64")
-    profile = json.loads((HERE / "profiles" / (args.profile + ".json")).read_text())
+    path = args.profile_file or HERE / "profiles" / (args.profile + ".json")
+    profile = json.loads(path.read_text())
     validate_profile(profile)
     os.umask(0o077)
-    artifacts = args.artifacts.resolve() / (args.profile + "-" + uuid.uuid4().hex[:12])
+    artifacts = args.artifacts.resolve() / (path.stem + "-" + uuid.uuid4().hex[:12])
     artifacts.mkdir(parents=True)
     print(f"Artifacts: {artifacts}", flush=True)
     signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))

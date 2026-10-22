@@ -34,6 +34,15 @@ Requirements: Linux x86_64, Docker with Compose v2, a Rust toolchain, uv, OpenSS
 
 Each file in `profiles/` pins every container image by digest and every package by SHA-256, and uses a Basic license on fresh data. To add a version, create a profile with verified digests and checksums and add it to `.github/workflows/deployments.yml`.
 
+## Snapshot
+
+`.github/workflows/snapshot.yml` runs nightly against the newest unreleased stack version, to catch breakage before a release. `snapshot_profile.py` pins that day's Elasticsearch, Kibana and Agent images by digest and copies the remaining locks from the newest profile. The generated profile is kept with the results, not in `profiles/`, so it is not a supported target. The workflow never runs on pull requests, so a failure does not block a merge.
+
+```sh
+uv run python tests/deployment/snapshot_profile.py --output /tmp/snapshot-basic.json
+uv run python -u tests/deployment/run.py --profile-file /tmp/snapshot-basic.json
+```
+
 ## Results
 
 Each run writes a JSON report, per-scenario logs, service logs and a cleanup log under `$XDG_STATE_HOME/security-client-tests`, or the directory given with `--artifacts`. Credentials are redacted. CI runs every profile and keeps artifacts for 14 days.

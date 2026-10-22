@@ -1,0 +1,55 @@
+name: Snapshot compatibility
+# Early warning against the next unreleased stack version. It runs on a
+# schedule only, so a failure never blocks a pull request or a release.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Snapshot version, such as 9.6.0-SNAPSHOT; defaults to the newest published one'
+        required: false
+  schedule:
+    - cron: '41 2 * * *'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
+      # Image extraction otherwise pushes the runner past Elasticsearch's disk watermark,
+      # which blocks shard allocation.
+      - name: Make room for deployment images
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet
+          df -h /
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # branch=master
+        with:
+          toolchain: stable
+      - uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # tag=v10.2.0
+        with:
+          python-version: '3.13'
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # tag=v2.9.2
+      - name: Pin today's snapshot images
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p '${{ runner.temp }}/deployment-results'
+          uv run python tests/deployment/snapshot_profile.py --output '${{ runner.temp }}/deployment-results/snapshot-basic.json' ${VERSION:+--version "$VERSION"}
+          jq -r '"Snapshot: \(.version)\n\n```json\n\(.images | tojson)\n```"' '${{ runner.temp }}/deployment-results/snapshot-basic.json' >> "$GITHUB_STEP_SUMMARY"
+      - name: Test deployment
+        run: uv run python -u tests/deployment/run.py --profile-file '${{ runner.temp }}/deployment-results/snapshot-basic.json' --artifacts '${{ runner.temp }}/deployment-results'
+      - name: Retain results, including failures
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # tag=v7.0.1
+        with:
+          name: deployment-snapshot
+          path: ${{ runner.temp }}/deployment-results
+          if-no-files-found: error
+          retention-days: 14

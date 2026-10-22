@@ -82,6 +82,15 @@ class RunnerTests(unittest.TestCase):
         self.deployment.api = Mock(side_effect=[full, [{"id": "default"}]])
         self.assertTrue(self.deployment.ready_kibana())
 
+    def test_snapshot_kibana_reports_release_version(self):
+        snapshot = Deployment({**self.profile, "version": "9.6.0-SNAPSHOT"}, self.path, self.path)
+        status = {"status": {"overall": {"level": "available"}}, "version": {"number": "9.6.0"}}
+        snapshot.api = Mock(side_effect=[status, [{"id": "default"}]])
+        self.assertTrue(snapshot.ready_kibana())
+        snapshot.api = Mock(return_value={**status, "version": {"number": "9.5.0"}})
+        with self.assertRaisesRegex(RuntimeError, "differs from profile"):
+            snapshot.ready_kibana()
+
 
 if __name__ == "__main__":
     unittest.main()
