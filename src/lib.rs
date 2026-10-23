@@ -35,6 +35,23 @@
 //! and imports, [`exceptions`] and [`cases`] for edits with concurrency tokens,
 //! [`fleet`] for integration formats and asynchronous actions, and [`pagination`]
 //! and [`poll`] for bounded traversal and waiting.
+//!
+//! # Errors and retries
+//!
+//! The client never retries, because whether a retry is safe depends on the
+//! request:
+//!
+//! - Reads can be retried on 429, 502, 503 and transport failures, honoring
+//!   [`Error::retry_after`], with backoff and an overall deadline.
+//! - A mutation interrupted by a timeout or dropped connection, including while
+//!   its response body is read, may or may not have been applied. Read the
+//!   resource back by a stable identifier, such as a rule's `rule_id`, before
+//!   trying again. A successful status on [`Error::Body`], [`Error::Decode`] or
+//!   [`Error::ResponseTooLarge`] shows that Kibana answered, not what it did.
+//! - On HTTP 409, read the resource again for its current version and reapply
+//!   the change.
+//!
+//! The `recovery` example in the repository implements these patterns.
 
 pub mod cases;
 mod client;

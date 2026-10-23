@@ -190,7 +190,8 @@ impl AgentUpload {
 
 impl<'a> Fleet<'a> {
     /// Recent agent actions with completion and failure counts, newest first.
-    /// Pages start at zero.
+    /// Pages start at zero. There is no filter by action ID, and a short or
+    /// empty page does not prove that older actions are absent.
     pub fn agent_action_status(&self) -> AgentActionStatuses<'a> {
         AgentActionStatuses(self.0.request(
             Method::GET,

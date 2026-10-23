@@ -181,7 +181,6 @@ def report(root, metadata, operations, rows):
         "- Every named builder has an offline test asserting its method, path, query and body.",
         "- **Live** is `success` or `rejection` when a linked scenario's outcome has been reviewed; `called` records call presence only. These labels describe tests, not a fresh passing run.",
         "- **Contract** is `partial` when a known request or response option is not modeled and `unreviewed` when the full contract has not been audited.",
-        "- The [supported workflow review](supported-contracts.md) records the checked subsets, version differences and limits. The separate [schema drift check](schema-drift.md) compares pinned contracts and validates retained fixtures.",
         f"- The published total includes {sum(bool(op.get('deprecated')) for op in operations.values())} deprecated operations and some internal or placeholder routes.", "",
         "| Builder | Operation ID | Route | Contract | Live | Limits |",
         "| --- | --- | --- | --- | --- | --- |",
@@ -233,11 +232,11 @@ def main():
     summary = (
         "<!-- BEGIN API COVERAGE -->\n"
         f"{len(rows)} of the {len(operations)} operations in the Kibana {metadata['version']} OpenAPI bundle have named builders. "
-        "See the [coverage report](docs/api-coverage.md) for each builder's route and known limits.\n"
+        "See the [coverage report](coverage/README.md) for each builder's route and known limits.\n"
         "<!-- END API COVERAGE -->"
     )
     updated_readme = re.sub(marker, lambda _: summary, current_readme, flags=re.S)
-    outputs = {ROOT / "docs/api-coverage.md": content, readme: updated_readme}
+    outputs = {ROOT / "coverage/README.md": content, readme: updated_readme}
     if args.check:
         for destination, expected in outputs.items():
             require(destination.exists() and destination.read_text() == expected, f"{destination.name} coverage is stale; regenerate and review the diff")
