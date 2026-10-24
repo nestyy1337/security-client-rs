@@ -21,7 +21,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        profile: [9.5.5-basic, 9.4.8-basic]
+        # The latest patch of every supported minor.
+        profile: [9.5.5-basic, 9.4.8-basic, 9.3.8-basic, 9.2.8-basic, 9.1.10-basic, 9.0.8-basic, 8.19.23-basic]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # tag=v7.0.1
       # Image extraction otherwise pushes the runner past Elasticsearch's disk watermark,

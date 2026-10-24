@@ -4,6 +4,10 @@ This project follows [Semantic Versioning](https://semver.org/). Until 1.0, mino
 
 ## Unreleased
 
+### Added
+
+- Kibana 8.19.23, 9.0.8, 9.1.10, 9.2.8 and 9.3.8 are supported targets, so the latest patch of 8.19 and of every 9.x minor is tested.
+
 ### Changed
 
 - Supported targets are Kibana 9.5.5 and 9.4.8, replacing 9.5.4 and 9.4.7. The 9.5.5 bundle is the new coverage baseline.

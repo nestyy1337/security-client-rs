@@ -30,6 +30,15 @@ fn client() -> Kibana {
     Kibana::new(builder.build().unwrap())
 }
 
+/// Whether the deployed Kibana is at least `major.minor`, for behaviour that
+/// differs between supported minors.
+fn kibana_at_least(major: u64, minor: u64) -> bool {
+    let version = std::env::var("KIBANA_TEST_VERSION")
+        .expect("KIBANA_TEST_VERSION must name the deployed version");
+    let mut parts = version.split('.').map(|part| part.parse::<u64>().unwrap());
+    (parts.next().unwrap(), parts.next().unwrap()) >= (major, minor)
+}
+
 async fn space(root: &Kibana) -> (String, Kibana) {
     let id = format!("krs-test-{}", uuid::Uuid::new_v4());
     let mut space = Space::new(&id, &id);
@@ -413,7 +422,8 @@ async fn fleet_enrollment_key_lifecycle_and_pagination() {
                 .item;
             assert!(key.active);
             assert!(!key.api_key.is_empty(), "enrollment API key is empty");
-            assert!(key.expire_at.is_some());
+            let reports_expiry = kibana_at_least(9, 4) || !kibana_at_least(9, 0);
+            assert_eq!(key.expire_at.is_some(), reports_expiry);
             assert!(!format!("{key:?}").contains(&key.api_key));
             let fetched = fleet
                 .get_enrollment_key(&key.id)
@@ -823,15 +833,17 @@ async fn fleet_policy_and_integration_lifecycle() {
         let populated = fleet.find_agent_policies().send().await?.json().await?;
         let listed = populated.items.iter().find(|p| p.id == policy.id).unwrap();
         assert_eq!(listed.package_policies.len(), 1);
-        let counted = fleet
-            .find_agent_policies()
-            .with_agent_count(true)
-            .send()
-            .await?
-            .json()
-            .await?;
-        let listed = counted.items.iter().find(|p| p.id == policy.id).unwrap();
-        assert_eq!(listed.agents, Some(0));
+        if kibana_at_least(9, 0) {
+            let counted = fleet
+                .find_agent_policies()
+                .with_agent_count(true)
+                .send()
+                .await?
+                .json()
+                .await?;
+            let listed = counted.items.iter().find(|p| p.id == policy.id).unwrap();
+            assert_eq!(listed.agents, Some(0));
+        }
         let replaced = integration("Updated integration test");
         fleet
             .update_package_policy(replaced.replacing(&attached.id))

@@ -57,6 +57,9 @@ impl GetAgent<'_> {
         self.rows[0]["operation_id"] = "renamed-operation"
         with self.assertRaisesRegex(ValueError, "Operation ID changed"):
             validate(self.root, inventory(self.spec), self.rows)
+        validate(self.root, inventory(self.spec), self.rows, check_ids=False)
+        with self.assertRaisesRegex(ValueError, "absent from pinned spec"):
+            validate(self.root, inventory(self.spec), rows, check_ids=False)
 
     def test_duplicate_upstream_route_is_not_silently_collapsed(self):
         self.spec["paths"]["/api/fleet/agents/{id}"] = {"get": {"operationId": "other-agent"}}

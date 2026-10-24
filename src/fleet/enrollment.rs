@@ -22,6 +22,7 @@ pub struct EnrollmentKey {
     pub policy_id: Option<String>,
     #[serde(default)]
     pub name: Option<String>,
+    /// Absent on Kibana 9.0 to 9.3, even for keys created with an expiration.
     #[serde(default)]
     pub expire_at: Option<String>,
 }

@@ -77,7 +77,7 @@ The [API documentation](https://docs.rs/security-client-rs) covers each module's
 
 ## Compatibility
 
-Tested against self-managed Kibana 9.5.5 and 9.4.8 with a Basic license on Linux x86_64. Other patches of those minor versions are expected to work but are not tested. 8.x, Serverless, Elastic Cloud and paid features are out of scope. The minimum Rust version is 1.88.
+Tested against self-managed Kibana 8.19.23, 9.0.8, 9.1.10, 9.2.8, 9.3.8, 9.4.8 and 9.5.5 with a Basic license on Linux x86_64. Other patches of those minor versions are expected to work but are not tested. Earlier 8.x minors, Serverless, Elastic Cloud and paid features are out of scope. The minimum Rust version is 1.88.
 
 Rule creation and updates capture the caller's privileges for execution, so use a dedicated service identity for detection-rule automation. See [Elastic's detection API authentication notes](https://www.elastic.co/docs/api/doc/kibana/group/endpoint-security-detections-api).
 

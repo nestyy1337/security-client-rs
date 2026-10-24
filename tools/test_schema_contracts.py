@@ -91,6 +91,12 @@ class SchemaTests(unittest.TestCase):
         self.assertIn("x-version", result["responses"]["200"]["headers"])
         self.assertNotEqual(self.hashes(self.spec), self.hashes(changed))
 
+    def test_operation_id_is_checked_unless_an_older_release_renamed_it(self):
+        renamed = dict(self.row, operation_id="renamed-fixture")
+        with self.assertRaisesRegex(ValueError, "Operation ID changed"):
+            contract(self.spec, renamed)
+        self.assertEqual(contract(self.spec, renamed, check_id=False), contract(self.spec, self.row))
+
     def test_recursive_references_terminate_and_bad_references_fail(self):
         recursive = {"components": {"schemas": {"Node": {"type": "object", "properties": {"next": {"$ref": "#/components/schemas/Node"}}}}}}
         actual = schema(recursive, {"$ref": "#/components/schemas/Node"})

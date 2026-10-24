@@ -215,11 +215,14 @@ macro_rules! bulk_setters {
     ($($name:ident),*) => {$(
         impl $name<'_> {
             /// Returns the number of selected agents instead of creating an action.
+            /// Kibana 9.3 and later; earlier versions reject the field.
             pub fn dry_run(self, dry_run: bool) -> Self {
                 Self(self.0.field("dryRun", dry_run))
             }
 
             /// How many agents Kibana processes per batch for query selections.
+            /// Kibana 9.0 and later; 8.19 accepts it only for tag updates and
+            /// diagnostics requests.
             pub fn batch_size(self, size: u32) -> Self {
                 Self(self.0.field("batchSize", size))
             }

@@ -131,7 +131,9 @@ def group(operation):
     return "Other APIs"
 
 
-def validate(root, operations, rows):
+def validate(root, operations, rows, check_ids=True):
+    """Check rows against one bundle. Older supported releases may name the
+    same route differently, so only the baseline checks operation IDs."""
     actual = wrappers(root)
     require(len(rows) == len({r["wrapper"] for r in rows}), "Duplicate wrapper entries")
     names = {r["wrapper"] for r in rows}
@@ -144,7 +146,7 @@ def validate(root, operations, rows):
         require(key not in seen, f"Duplicate operation mapping: {key}")
         seen.add(key)
         require(key in operations, f"Operation absent from pinned spec: {key}")
-        require(operations[key]["operationId"] == row["operation_id"], f"Operation ID changed: {key}")
+        require(not check_ids or operations[key]["operationId"] == row["operation_id"], f"Operation ID changed: {key}")
         expected = (*key, row["scope"])
         require(actual[row["wrapper"]] == expected, f"Rust route differs: {row['wrapper']}")
         require(row["contract"] in {"partial", "unreviewed"}, "Complete contracts require an explicit audit mechanism")

@@ -14,6 +14,14 @@ use security_client_rs::{
 use serde_json::{Value, json};
 use std::time::{Duration, Instant};
 
+/// Whether the deployed Kibana is at least `major.minor`, for behaviour that
+/// differs between supported minors.
+fn kibana_at_least(major: u64, minor: u64) -> bool {
+    let version = env("KIBANA_TEST_VERSION");
+    let mut parts = version.split('.').map(|part| part.parse::<u64>().unwrap());
+    (parts.next().unwrap(), parts.next().unwrap()) >= (major, minor)
+}
+
 fn env(name: &str) -> String {
     std::env::var(name).unwrap_or_else(|_| panic!("{name} must come from the deployment runner"))
 }
@@ -412,17 +420,19 @@ async fn fleet_agent_bulk_actions_and_diagnostics() {
     let fleet = client.fleet();
     let agent_id = env("KIBANA_TEST_AGENT_ID");
     let peer_id = env("KIBANA_TEST_PEER_ID");
-    let preview = fleet
-        .bulk_unenroll_agents(ids(&[&agent_id]))
-        .batch_size(1)
-        .dry_run(true)
-        .send()
-        .await
-        .unwrap()
-        .json()
-        .await
-        .unwrap();
-    assert!(matches!(preview, BulkActionResult::DryRun { count: 1 }));
+    if kibana_at_least(9, 3) {
+        let preview = fleet
+            .bulk_unenroll_agents(ids(&[&agent_id]))
+            .batch_size(1)
+            .dry_run(true)
+            .send()
+            .await
+            .unwrap()
+            .json()
+            .await
+            .unwrap();
+        assert!(matches!(preview, BulkActionResult::DryRun { count: 1 }));
+    }
     assert_eq!(
         fleet
             .get_agent(&agent_id)
@@ -513,18 +523,22 @@ async fn fleet_agent_bulk_actions_and_diagnostics() {
     successful_action(&wait_for_action(&client, task).await);
     wait_for_policy(&client, &agent_id, &original.id, original.revision).await;
 
-    assert!(matches!(
-        fleet
-            .bulk_request_agent_diagnostics(AgentSelection::Query("policy_id:fixture-agent".into()))
-            .dry_run(true)
-            .send()
-            .await
-            .unwrap()
-            .json()
-            .await
-            .unwrap(),
-        BulkActionResult::DryRun { count: 1 }
-    ));
+    if kibana_at_least(9, 3) {
+        assert!(matches!(
+            fleet
+                .bulk_request_agent_diagnostics(AgentSelection::Query(
+                    "policy_id:fixture-agent".into()
+                ))
+                .dry_run(true)
+                .send()
+                .await
+                .unwrap()
+                .json()
+                .await
+                .unwrap(),
+            BulkActionResult::DryRun { count: 1 }
+        ));
+    }
     let diagnostics = fleet
         .request_agent_diagnostics(&agent_id)
         .send()

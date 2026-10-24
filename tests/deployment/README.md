@@ -49,4 +49,4 @@ Each run writes a JSON report, per-scenario logs, service logs and a cleanup log
 
 ## Limits
 
-Container agents cannot be upgraded through Fleet, so successful upgrades and upgrade cancellation are not covered. Paid features, Elastic Defend, Serverless, Elastic Cloud, 8.x and stack upgrades are not covered.
+Container agents cannot be upgraded through Fleet, so successful upgrades and upgrade cancellation are not covered. Paid features, Elastic Defend, Serverless, Elastic Cloud, 8.x before 8.19 and stack upgrades are not covered.

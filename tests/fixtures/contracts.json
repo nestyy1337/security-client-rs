@@ -2,6 +2,11 @@
   "query-create": {
     "wrapper": "security.create_rule",
     "versions": [
+      "8.19.23",
+      "9.0.8",
+      "9.1.10",
+      "9.2.8",
+      "9.3.8",
       "9.4.8",
       "9.5.5"
     ],
@@ -26,6 +31,11 @@
   "query-response": {
     "wrapper": "security.get_rule",
     "versions": [
+      "8.19.23",
+      "9.0.8",
+      "9.1.10",
+      "9.2.8",
+      "9.3.8",
       "9.4.8",
       "9.5.5"
     ],
@@ -88,6 +98,11 @@
   "query-patch": {
     "wrapper": "security.patch_rule",
     "versions": [
+      "8.19.23",
+      "9.0.8",
+      "9.1.10",
+      "9.2.8",
+      "9.3.8",
       "9.4.8",
       "9.5.5"
     ],
@@ -99,6 +114,11 @@
   "rule-import-partial": {
     "wrapper": "security.import_rules",
     "versions": [
+      "8.19.23",
+      "9.0.8",
+      "9.1.10",
+      "9.2.8",
+      "9.3.8",
       "9.4.8",
       "9.5.5"
     ],
@@ -138,6 +158,11 @@
   "case-update": {
     "wrapper": "cases.update",
     "versions": [
+      "8.19.23",
+      "9.0.8",
+      "9.1.10",
+      "9.2.8",
+      "9.3.8",
       "9.4.8",
       "9.5.5"
     ],
@@ -223,6 +248,11 @@
   "exception-item-edit": {
     "wrapper": "exceptions.update_item",
     "versions": [
+      "8.19.23",
+      "9.0.8",
+      "9.1.10",
+      "9.2.8",
+      "9.3.8",
       "9.4.8",
       "9.5.5"
     ],
@@ -278,6 +308,8 @@
   "agent-policy-clear-output": {
     "wrapper": "fleet.update_agent_policy",
     "versions": [
+      "8.19.23",
+      "9.3.8",
       "9.4.8",
       "9.5.5"
     ],
@@ -312,6 +344,7 @@
   "package-policy-full": {
     "wrapper": "fleet.get_package_policy",
     "versions": [
+      "8.19.23",
       "9.4.8",
       "9.5.5"
     ],
@@ -459,6 +492,10 @@
   "action-status": {
     "wrapper": "fleet.agent_action_status",
     "versions": [
+      "9.0.8",
+      "9.1.10",
+      "9.2.8",
+      "9.3.8",
       "9.4.8",
       "9.5.5"
     ],
@@ -484,6 +521,11 @@
   "space-update": {
     "wrapper": "spaces.update",
     "versions": [
+      "8.19.23",
+      "9.0.8",
+      "9.1.10",
+      "9.2.8",
+      "9.3.8",
       "9.4.8",
       "9.5.5"
     ],
@@ -498,6 +540,11 @@
   "role-definition": {
     "wrapper": "roles.put",
     "versions": [
+      "8.19.23",
+      "9.0.8",
+      "9.1.10",
+      "9.2.8",
+      "9.3.8",
       "9.4.8",
       "9.5.5"
     ],

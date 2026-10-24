@@ -1,0 +1,25 @@
+{
+  "version": "9.1.10",
+  "license": "basic",
+  "platform": "linux/amd64",
+  "images": {
+    "ES_IMAGE": "docker.elastic.co/elasticsearch/elasticsearch@sha256:33f1f7f235c9256fdf301f13af933eaf7b9fc6fca8f7769980110ee7f29a34f1",
+    "KIBANA_IMAGE": "docker.elastic.co/kibana/kibana@sha256:61fb284b6b3c51b6c0f47f89bda87936ebd993a86660aefcb181e6961602cca3",
+    "AGENT_IMAGE": "docker.elastic.co/elastic-agent/elastic-agent@sha256:93aaaf220d4b8f9a10ee5055d9cd5a98cfd740629cadf32f630ad353e9d9473c",
+    "EPR_IMAGE": "docker.elastic.co/package-registry/package-registry@sha256:d1123817423c54ef11d9b42645e0c076d67fe4e7898a3295172b67ce9f78767a",
+    "GATEWAY_IMAGE": "docker.io/library/haproxy@sha256:686211da34aba401814bb109c813db6a579491bc8753bfd81b78cce7d1e02f7c"
+  },
+  "packages": {
+    "system": "2.6.3",
+    "fleet_server": "1.6.1",
+    "elastic_agent": "2.9.6"
+  },
+  "package_sha256": {
+    "elastic_agent-2.9.6.zip": "990e578f409051523243b41e951ca1c691abdbd5705a4de96db020d58feeca34",
+    "elastic_agent-2.9.6.zip.sig": "76779661297665e7d1c757d45d8e8370cf9ae592fbedada3c3f95a0d75a8788c",
+    "fleet_server-1.6.1.zip": "d6d1e77c07b543f27fcb75913854104a7280d1787d65703acc0a011aa15b5c60",
+    "fleet_server-1.6.1.zip.sig": "9189dd1e74dbe817dc7c995e09ee3fa160e3f2baba7de731338ceca4beb776a0",
+    "system-2.6.3.zip": "5573666fd71cbc7915712fb077c3fb68468222703b30ddbd9cda91dafbb8a22e",
+    "system-2.6.3.zip.sig": "f59dca2696d3d2e78166e8a380c61b200900b4424556baa6ee92b5bf8160544a"
+  }
+}

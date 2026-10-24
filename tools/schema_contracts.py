@@ -107,10 +107,10 @@ def content(spec, values):
     return result
 
 
-def contract(spec, row):
+def contract(spec, row, check_id=True):
     path = spec["paths"][row["path"]]
     operation = path[row["method"].lower()]
-    require(operation["operationId"] == row["operation_id"], f"Operation ID changed: {row['wrapper']}")
+    require(not check_id or operation["operationId"] == row["operation_id"], f"Operation ID changed: {row['wrapper']}")
     parameters = {}
     for value in [*path.get("parameters", []), *operation.get("parameters", [])]:
         value = parameter(spec, value)
@@ -307,8 +307,10 @@ def main():
                 subprocess.run(["curl", "--fail", "--silent", "--show-error", "--location", "--max-time", "120",
                                 pin["url"], "--output", str(path)], check=True)
             specs[pin["version"]] = load_spec(pin, path)
-            validate(ROOT, inventory(specs[pin["version"]]), rows)
-        contracts = {version: {row["wrapper"]: contract(spec, row) for row in rows} for version, spec in specs.items()}
+            validate(ROOT, inventory(specs[pin["version"]]), rows, check_ids=pin is versions[-1])
+        baseline = versions[-1]["version"]
+        contracts = {version: {row["wrapper"]: contract(spec, row, check_id=version == baseline) for row in rows}
+                     for version, spec in specs.items()}
         validate_fixtures(specs, rows, fixtures)
         if args.report:
             args.report.write_text(report(versions, contracts, fixtures))
