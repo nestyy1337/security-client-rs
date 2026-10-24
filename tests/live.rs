@@ -823,6 +823,14 @@ async fn fleet_policy_and_integration_lifecycle() {
         let populated = fleet.find_agent_policies().send().await?.json().await?;
         let listed = populated.items.iter().find(|p| p.id == policy.id).unwrap();
         assert_eq!(listed.package_policies.len(), 1);
+        let counted = fleet
+            .find_agent_policies()
+            .with_agent_count(true)
+            .send()
+            .await?
+            .json()
+            .await?;
+        let listed = counted.items.iter().find(|p| p.id == policy.id).unwrap();
         assert_eq!(listed.agents, Some(0));
         let replaced = integration("Updated integration test");
         fleet

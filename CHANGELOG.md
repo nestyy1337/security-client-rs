@@ -7,6 +7,7 @@ This project follows [Semantic Versioning](https://semver.org/). Until 1.0, mino
 ### Changed
 
 - Supported targets are Kibana 9.5.5 and 9.4.8, replacing 9.5.4 and 9.4.7. The 9.5.5 bundle is the new coverage baseline.
+- `Fleet::find_agent_policies` no longer requests agent counts, because Kibana 8.19 rejects `withAgentCount`. Call `with_agent_count(true)` to populate `AgentPolicy::agents`.
 
 ## 0.1.0 - 2026-10-01
 

@@ -620,18 +620,14 @@ async fn agent_policies_lifecycle() {
     mock.take().route(
         "GET",
         "/s/soc/api/fleet/agent_policies",
-        &[
-            ("full", "true"),
-            ("withAgentCount", "true"),
-            ("perPage", "50"),
-        ],
+        &[("full", "true"), ("perPage", "50")],
     );
     mock.json(json!({"items": [], "page": 2, "perPage": 1, "total": 0}));
     client
         .fleet()
         .find_agent_policies()
         .full(false)
-        .with_agent_count(false)
+        .with_agent_count(true)
         .page(2)
         .kuery("name:SOC*")
         .sort_field("updated_at")
@@ -644,7 +640,7 @@ async fn agent_policies_lifecycle() {
         "/s/soc/api/fleet/agent_policies",
         &[
             ("full", "false"),
-            ("withAgentCount", "false"),
+            ("withAgentCount", "true"),
             ("page", "2"),
             ("kuery", "name:SOC*"),
             ("sortField", "updated_at"),

@@ -260,8 +260,8 @@ impl AgentPolicyEdit {
 }
 
 impl<'a> Fleet<'a> {
-    /// Requests full policies with agent counts, which populate
-    /// [`AgentPolicy::package_policies`] and [`AgentPolicy::agents`].
+    /// Requests full policies, which populate [`AgentPolicy::package_policies`].
+    /// Agent counts are opt-in through [`FindAgentPolicies::with_agent_count`].
     pub fn find_agent_policies(&self) -> FindAgentPolicies<'a> {
         FindAgentPolicies(
             self.0
@@ -270,8 +270,7 @@ impl<'a> Fleet<'a> {
                     Scope::Space,
                     &["api", "fleet", "agent_policies"],
                 )
-                .param("full", true)
-                .param("withAgentCount", true),
+                .param("full", true),
         )
     }
 
@@ -374,7 +373,8 @@ impl FindAgentPolicies<'_> {
         Self(self.0.param("full", full))
     }
 
-    /// Populates agent counts. Enabled by default.
+    /// Populates [`AgentPolicy::agents`]. Kibana 8.19 rejects this parameter,
+    /// including when it is false.
     pub fn with_agent_count(self, enabled: bool) -> Self {
         Self(self.0.param("withAgentCount", enabled))
     }
