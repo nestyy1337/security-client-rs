@@ -235,7 +235,8 @@ class Deployment:
             return health.get("status") in {"yellow", "green"} and not health.get("timed_out")
         self.wait("Elasticsearch", healthy)
         version = self.api("es", "/")["version"]["number"]
-        license_type = self.api("es", "/_license")["license"]["type"]
+        # A fresh cluster answers 404 until its self-generated license is stored.
+        license_type = self.wait("Elasticsearch license", lambda: self.api("es", "/_license")["license"]["type"])
         if version != self.profile["version"] or license_type != self.profile["license"]:
             raise RuntimeError(f"Unexpected deployment: Elasticsearch {version}, license {license_type}")
         self.wait("local package registry", lambda: self.api("epr", "/health?ready=true") is not False)
