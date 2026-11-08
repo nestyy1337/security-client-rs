@@ -147,8 +147,106 @@ async fn find_rules_sends_only_selected_options_and_decodes_pages() {
             .per_page,
         20
     );
+    mock.take().route(
+        "GET",
+        "/s/soc/api/detection_engine/rules/_find",
+        &[("sort_field", "created_at"), ("sort_order", "asc")],
+    );
+}
+
+#[tokio::test]
+async fn rules_decode_their_exception_lists_and_authors() {
+    let mock = Mock::start().await;
+    let mut body = rule("a");
+    body["exceptions_list"] = json!([{"id": "so-1", "list_id": "global-exceptions-a",
+                                      "namespace_type": "single", "type": "detection"}]);
+    body["created_by"] = json!("elastic");
+    body["updated_by"] = json!("iris");
+    mock.json(body);
+    let rule = mock
+        .client()
+        .security()
+        .get_rule(RuleSelector::RuleId("stable-id"))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(rule.exceptions_list[0].list_id, "global-exceptions-a");
+    assert_eq!(
+        rule.exceptions_list[0].namespace_type,
+        NamespaceType::Single
+    );
+    assert_eq!(rule.created_by.as_deref(), Some("elastic"));
+    assert_eq!(rule.updated_by.as_deref(), Some("iris"));
+    assert!(!rule.extra.contains_key("exceptions_list"));
+}
+
+#[tokio::test]
+async fn alert_searches_send_only_set_options_and_decode_totals() {
+    let mock = Mock::start().await;
+    let client = mock.soc();
+    mock.json(json!({
+        "took": 3, "timed_out": false,
+        "_shards": {"total": 1, "successful": 1, "skipped": 0, "failed": 0},
+        "hits": {"total": {"value": 7041, "relation": "eq"}, "max_score": null, "hits": []},
+        "aggregations": {"hosts": {"buckets": [{"key": "web-01", "doc_count": 7041}]}}
+    }));
+    let query = json!({"term": {"kibana.alert.rule.rule_id": "failed-logins"}});
+    let result = client
+        .security()
+        .search_alerts()
+        .query(&query)
+        .aggs(json!({"hosts": {"terms": {"field": "host.name"}}}))
+        .size(0)
+        .track_total_hits(true)
+        .sort(json!([{"@timestamp": "desc"}]))
+        .source(false)
+        .fields(["host.name"])
+        .runtime_mappings(json!({}))
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(result.total(), 7041);
+    assert_eq!(result.hits.total.as_ref().unwrap().relation, "eq");
+    assert_eq!(
+        result.aggregations.unwrap()["hosts"]["buckets"][0]["doc_count"],
+        7041
+    );
+    assert_eq!(result.extra["took"], 3);
     mock.take()
-        .route("GET", "/s/soc/api/detection_engine/rules/_find", &[]);
+        .route("POST", "/s/soc/api/detection_engine/signals/search", &[])
+        .body(json!({
+            "query": query,
+            "aggs": {"hosts": {"terms": {"field": "host.name"}}},
+            "size": 0,
+            "track_total_hits": true,
+            "sort": [{"@timestamp": "desc"}],
+            "_source": false,
+            "fields": ["host.name"],
+            "runtime_mappings": {}
+        }));
+
+    mock.json(json!({"hits": {"hits": [{"_id": "a", "_source": {}}]}}));
+    let result = client
+        .default_space()
+        .security()
+        .search_alerts()
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(result.total(), 0, "an untracked total counts as zero");
+    assert_eq!(result.hits.hits[0]["_id"], "a");
+    mock.take()
+        .route("POST", "/api/detection_engine/signals/search", &[])
+        .body(json!({}));
 }
 
 #[tokio::test]

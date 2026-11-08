@@ -167,6 +167,7 @@ async fn errors_keep_status_headers_bounded_body_and_kibana_message() {
     );
     let error = client.status().send().await.unwrap_err();
     assert_eq!(error.status(), Some(StatusCode::CONFLICT));
+    assert!(error.is_conflict());
     assert_eq!(error.message().as_deref(), Some("version conflict"));
     assert!(error.body().unwrap().contains("Conflict"));
     assert!(

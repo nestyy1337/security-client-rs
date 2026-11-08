@@ -5,6 +5,40 @@
 //! ID from the stable rule ID. Imports can succeed for rules while failing for
 //! their dependencies; inspect [`RuleImportResult`] before treating the import
 //! as complete.
+//!
+//! [`Security::search_alerts`] queries the space's detection alerts. With
+//! [`exceptions::query`](crate::exceptions::query) it shows which alerts an
+//! exception would have suppressed:
+//!
+//! ```no_run
+//! use security_client_rs::{Kibana, exceptions::{self, Entry, Operator}};
+//! use serde_json::json;
+//!
+//! # async fn run(client: Kibana) -> security_client_rs::Result<()> {
+//! let entries = [Entry::Match {
+//!     field: "process.name".into(),
+//!     operator: Operator::Included,
+//!     value: "git".into(),
+//! }];
+//! let exception = exceptions::item_query(&entries, &[])?;
+//! let matched = client
+//!     .security()
+//!     .search_alerts()
+//!     .query(json!({"bool": {"filter": [
+//!         {"term": {"kibana.alert.rule.rule_id": "failed-logins"}},
+//!         {"term": {"kibana.alert.workflow_status": "open"}},
+//!         exception,
+//!     ]}}))
+//!     .size(0)
+//!     .track_total_hits(true)
+//!     .send()
+//!     .await?
+//!     .json()
+//!     .await?;
+//! println!("{} open alerts would be suppressed", matched.total());
+//! # Ok(())
+//! # }
+//! ```
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -164,8 +198,15 @@ pub struct DetectionRule {
     #[serde(default)]
     pub updated_at: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_by: Option<String>,
+    /// Exception lists applied to this rule. A patch replaces the whole array.
+    #[serde(default)]
+    pub exceptions_list: Vec<ListReference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_summary: Option<RuleExecutionSummary>,
-    /// Type-specific and newer fields, including `exceptions_list`.
+    /// Type-specific and newer fields.
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }
@@ -389,12 +430,22 @@ impl<'a> Security<'a> {
     }
 
     /// One page of rules. Page through `total` to read the whole collection.
+    ///
+    /// Rules are sorted by `created_at`, ascending, unless
+    /// [`FindRules::sort_field`] is set. Without a sort, Kibana returns pages
+    /// in an unstable order, so paging repeats some rules and skips others.
+    /// Another sort field with repeated values can do the same.
     pub fn find_rules(&self) -> FindRules<'a> {
-        FindRules(self.0.request(
-            Method::GET,
-            Scope::Space,
-            &["api", "detection_engine", "rules", "_find"],
-        ))
+        FindRules(
+            self.0
+                .request(
+                    Method::GET,
+                    Scope::Space,
+                    &["api", "detection_engine", "rules", "_find"],
+                )
+                .param("sort_field", "created_at")
+                .param("sort_order", SortOrder::Asc.as_str()),
+        )
     }
 
     pub fn get_rule(&self, rule: RuleSelector<'_>) -> GetRule<'a> {
@@ -460,6 +511,20 @@ impl<'a> Security<'a> {
         ))
     }
 
+    /// Searches the space's detection alerts with Elasticsearch query DSL.
+    /// Without [`SearchAlerts::query`], every alert matches.
+    pub fn search_alerts(&self) -> SearchAlerts<'a> {
+        SearchAlerts(
+            self.0
+                .request(
+                    Method::POST,
+                    Scope::Space,
+                    &["api", "detection_engine", "signals", "search"],
+                )
+                .json(&Map::new()),
+        )
+    }
+
     /// Imports an NDJSON export. Partial failures are reported with HTTP 200.
     pub fn import_rules(&self, ndjson: impl Into<Vec<u8>>) -> ImportRules<'a> {
         ImportRules(
@@ -511,6 +576,91 @@ impl FindRules<'_> {
     pub fn sort_order(self, order: SortOrder) -> Self {
         Self(self.0.param("sort_order", order.as_str()))
     }
+}
+
+endpoint! {
+    /// `POST /api/detection_engine/signals/search`
+    SearchAlerts => AlertSearch
+}
+
+impl SearchAlerts<'_> {
+    /// An Elasticsearch query, such as one built by [`crate::exceptions::query`].
+    pub fn query(self, query: impl Serialize) -> Self {
+        Self(self.0.field("query", query))
+    }
+
+    pub fn aggs(self, aggs: impl Serialize) -> Self {
+        Self(self.0.field("aggs", aggs))
+    }
+
+    /// The number of alerts to return. Zero returns only the total and aggregations.
+    pub fn size(self, size: u32) -> Self {
+        Self(self.0.field("size", size))
+    }
+
+    /// Counts every match. Otherwise Elasticsearch stops counting at 10,000.
+    pub fn track_total_hits(self, track: bool) -> Self {
+        Self(self.0.field("track_total_hits", track))
+    }
+
+    /// Elasticsearch sort clauses.
+    pub fn sort(self, sort: impl Serialize) -> Self {
+        Self(self.0.field("sort", sort))
+    }
+
+    /// Source filtering: `false`, a field pattern, or a list of patterns.
+    pub fn source(self, source: impl Serialize) -> Self {
+        Self(self.0.field("_source", source))
+    }
+
+    /// Fields to return in each hit's `fields`.
+    pub fn fields<I: IntoIterator<Item = S>, S: Into<String>>(self, fields: I) -> Self {
+        let fields: Vec<String> = fields.into_iter().map(Into::into).collect();
+        Self(self.0.field("fields", fields))
+    }
+
+    pub fn runtime_mappings(self, mappings: impl Serialize) -> Self {
+        Self(self.0.field("runtime_mappings", mappings))
+    }
+}
+
+/// An Elasticsearch search response over detection alerts.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct AlertSearch {
+    pub hits: AlertHits,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub aggregations: Option<Map<String, Value>>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+impl AlertSearch {
+    /// The number of matching alerts, or a lower bound when
+    /// [`TotalHits::relation`] is `gte`. Zero when the total was not tracked.
+    pub fn total(&self) -> u64 {
+        self.hits.total.as_ref().map_or(0, |total| total.value)
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct AlertHits {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total: Option<TotalHits>,
+    /// Each hit with its `_id`, `_index` and `_source` alert document.
+    #[serde(default)]
+    pub hits: Vec<Value>,
+    #[serde(flatten)]
+    pub extra: Map<String, Value>,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[non_exhaustive]
+pub struct TotalHits {
+    pub value: u64,
+    /// `eq` for an exact count, `gte` for a lower bound.
+    pub relation: String,
 }
 
 endpoint! {

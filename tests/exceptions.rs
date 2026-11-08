@@ -4,9 +4,9 @@ use common::Mock;
 use security_client_rs::{
     Error, SortOrder,
     exceptions::{
-        Comment, Entry, ExceptionItem, ExceptionList, ItemSelector, ItemTarget, ListReference,
-        ListSelector, ListTarget, NamespaceType, NestedEntry, NewItem, NewList, Operator, OsType,
-        ValueListReference,
+        self, Comment, Entry, ExceptionItem, ExceptionList, ItemSelector, ItemTarget,
+        ListReference, ListSelector, ListTarget, NamespaceType, NestedEntry, NewItem, NewList,
+        Operator, OsType, ValueListReference,
     },
 };
 use serde_json::{Map, Value, json};
@@ -659,4 +659,105 @@ async fn retrieved_resources_select_their_own_namespace() {
         assert!(matches!(error, Error::InvalidRequest(_)), "{error:?}");
     }
     assert_eq!(mock.request_count(), 0);
+}
+
+fn stored_item(item: &Value) -> ExceptionItem {
+    let mut stored = item_json("so-1");
+    stored["entries"] = item["entries"].clone();
+    stored["os_types"] = item.get("os_types").cloned().unwrap_or(json!([]));
+    serde_json::from_value(stored).unwrap()
+}
+
+#[test]
+fn queries_match_the_filter_kibana_builds() {
+    let golden: Value =
+        serde_json::from_str(include_str!("fixtures/exception_queries.json")).unwrap();
+    let cases = golden["cases"].as_array().unwrap();
+    assert!(cases.len() > 10);
+    for case in cases {
+        let name = case["name"].as_str().unwrap();
+        let items: Vec<ExceptionItem> = case["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(stored_item)
+            .collect();
+        assert_eq!(exceptions::query(&items).unwrap(), case["query"], "{name}");
+        if let [item] = case["items"].as_array().unwrap().as_slice() {
+            let entries: Vec<Entry> = serde_json::from_value(item["entries"].clone()).unwrap();
+            let os_types: Vec<OsType> =
+                serde_json::from_value(item.get("os_types").cloned().unwrap_or(json!([]))).unwrap();
+            assert_eq!(
+                exceptions::item_query(&entries, &os_types).unwrap(),
+                case["query"],
+                "{name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn queries_refuse_items_they_cannot_express() {
+    let refused = |error: Error, expected: &str| match error {
+        Error::InvalidRequest(message) => assert!(message.contains(expected), "{message}"),
+        other => panic!("wrong error: {other}"),
+    };
+    let no_items: [&ExceptionItem; 0] = [];
+    refused(
+        exceptions::query(no_items).unwrap_err(),
+        "at least one exception item",
+    );
+    refused(
+        exceptions::item_query(&[], &[]).unwrap_err(),
+        "at least one entry",
+    );
+
+    let list = Entry::List {
+        field: "source.ip".into(),
+        operator: Operator::Included,
+        list: ValueListReference::new("scanners", "ip"),
+    };
+    refused(
+        exceptions::item_query(&[list], &[]).unwrap_err(),
+        "value-list",
+    );
+
+    let empty_any = Entry::MatchAny {
+        field: "host.name".into(),
+        operator: Operator::Included,
+        value: vec![],
+    };
+    refused(
+        exceptions::item_query(&[empty_any], &[]).unwrap_err(),
+        "match_any",
+    );
+
+    let empty_nested = Entry::Nested {
+        field: "file.Ext.code_signature".into(),
+        entries: vec![],
+    };
+    refused(
+        exceptions::item_query(&[empty_nested], &[]).unwrap_err(),
+        "nested",
+    );
+
+    let unknown: ExceptionItem = serde_json::from_value(item_json("so-1")).unwrap();
+    refused(
+        exceptions::query([&unknown]).unwrap_err(),
+        "\"scanner-1\": an entry has a type",
+    );
+}
+
+#[test]
+fn items_decode_who_created_and_last_changed_them() {
+    let mut body = item_json("so-1");
+    body["created_by"] = json!("elastic");
+    body["created_at"] = json!("2026-06-25T10:00:00.000Z");
+    body["updated_by"] = json!("szymon.gluch");
+    body["updated_at"] = json!("2026-11-08T13:00:00.000Z");
+    let item: ExceptionItem = serde_json::from_value(body).unwrap();
+    assert_eq!(item.created_by.as_deref(), Some("elastic"));
+    assert_eq!(item.updated_by.as_deref(), Some("szymon.gluch"));
+    assert_eq!(item.updated_at.as_deref(), Some("2026-11-08T13:00:00.000Z"));
+    assert!(!item.extra.contains_key("updated_by"));
 }

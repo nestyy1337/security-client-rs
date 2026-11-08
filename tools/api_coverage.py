@@ -21,7 +21,7 @@ NON_ENDPOINTS = {
     "client.cases", "client.default_space", "client.exceptions", "client.fleet", "client.request",
     "client.roles", "client.security", "client.space", "client.space_id", "client.spaces", "client.transport",
     "exceptions.edit", "exceptions.reference", "fleet.as_str", "fleet.edit", "fleet.edit_agent_policy", "fleet.is_finished",
-    "fleet.wait_for_action", "fleet.wait_for_agent_policy", "fleet.wait_for_upload",
+    "fleet.wait_for_action", "fleet.wait_for_agent_policy", "fleet.wait_for_upload", "security.total",
 }
 # Helpers that send requests through named builders. A test calling the helper exercises them.
 HELPER_CALLS = {

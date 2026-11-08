@@ -112,6 +112,12 @@ impl Error {
         }
     }
 
+    /// Whether Kibana rejected the request with HTTP 409, as for a stale
+    /// concurrency token or an identifier that already exists.
+    pub fn is_conflict(&self) -> bool {
+        matches!(self, Self::Api { status, .. } if *status == StatusCode::CONFLICT)
+    }
+
     /// The headers of a response that arrived.
     pub fn headers(&self) -> Option<&HeaderMap> {
         match self {

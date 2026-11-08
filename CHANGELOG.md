@@ -7,10 +7,16 @@ This project follows [Semantic Versioning](https://semver.org/). Until 1.0, mino
 ### Added
 
 - Kibana 8.19.23, 9.0.8, 9.1.10, 9.2.8 and 9.3.8 are supported targets, so the latest patch of 8.19 and of every 9.x minor is tested.
+- `Security::search_alerts` searches a space's detection alerts with Elasticsearch query DSL and returns `AlertSearch`.
+- `exceptions::query` and `exceptions::item_query` build the Elasticsearch query matching what exception items suppress, as Kibana builds it, to preview an exception against existing alerts.
+- `Error::is_conflict` for HTTP 409 responses.
+- Typed `DetectionRule::exceptions_list`, `created_by` and `updated_by`, and `ExceptionItem::created_at`, `created_by`, `updated_at` and `updated_by`.
 
 ### Changed
 
 - Supported targets are Kibana 9.5.5 and 9.4.8, replacing 9.5.4 and 9.4.7. The 9.5.5 bundle is the new coverage baseline.
+- `Security::find_rules` sorts by `created_at`, ascending, unless `sort_field` is set. Unsorted, Kibana pages rules in an unstable order: paging 1846 rules by 100 returned only 1410 distinct rules.
+- The newly typed rule and item fields are no longer in `extra`.
 - `Fleet::find_agent_policies` no longer requests agent counts, because Kibana 8.19 rejects `withAgentCount`. Call `with_agent_count(true)` to populate `AgentPolicy::agents`.
 
 ## 0.1.0 - 2026-10-01

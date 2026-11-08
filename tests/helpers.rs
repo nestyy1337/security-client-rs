@@ -47,7 +47,13 @@ async fn items_follow_pages_until_the_total_is_reached() {
         mock.take().route(
             "GET",
             "/s/soc/api/detection_engine/rules/_find",
-            &[("per_page", "2"), ("filter", "x: y"), ("page", page)],
+            &[
+                ("sort_field", "created_at"),
+                ("sort_order", "asc"),
+                ("per_page", "2"),
+                ("filter", "x: y"),
+                ("page", page),
+            ],
         );
     }
     assert_eq!(

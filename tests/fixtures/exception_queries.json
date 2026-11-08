@@ -1,0 +1,1031 @@
+{
+  "kibana": [
+    "8.19.23",
+    "9.1.4",
+    "9.5.5"
+  ],
+  "source": "x-pack/solutions/security/plugins/lists/server/services/exception_lists/build_exception_filter.ts, buildExceptionFilter(...).filter.query",
+  "cases": [
+    {
+      "name": "match included",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "match",
+              "field": "process.name",
+              "operator": "included",
+              "value": "git"
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "minimum_should_match": 1,
+                "should": [
+                  {
+                    "match_phrase": {
+                      "process.name": "git"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "match excluded",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "match",
+              "field": "user.name",
+              "operator": "excluded",
+              "value": "root"
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "must_not": {
+                  "bool": {
+                    "minimum_should_match": 1,
+                    "should": [
+                      {
+                        "match_phrase": {
+                          "user.name": "root"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "match_any with one value",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "match_any",
+              "field": "host.name",
+              "operator": "included",
+              "value": [
+                "web-01"
+              ]
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "minimum_should_match": 1,
+                "should": [
+                  {
+                    "match_phrase": {
+                      "host.name": "web-01"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "match_any with several values",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "match_any",
+              "field": "host.name",
+              "operator": "included",
+              "value": [
+                "web-01",
+                "web-02",
+                "db-01"
+              ]
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "minimum_should_match": 1,
+                "should": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.name": "web-01"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.name": "web-02"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.name": "db-01"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "match_any excluded",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "match_any",
+              "field": "event.action",
+              "operator": "excluded",
+              "value": [
+                "logon",
+                "logoff"
+              ]
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "must_not": {
+                  "bool": {
+                    "minimum_should_match": 1,
+                    "should": [
+                      {
+                        "bool": {
+                          "minimum_should_match": 1,
+                          "should": [
+                            {
+                              "match_phrase": {
+                                "event.action": "logon"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "bool": {
+                          "minimum_should_match": 1,
+                          "should": [
+                            {
+                              "match_phrase": {
+                                "event.action": "logoff"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "exists included",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "exists",
+              "field": "process.parent.name",
+              "operator": "included"
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "minimum_should_match": 1,
+                "should": [
+                  {
+                    "exists": {
+                      "field": "process.parent.name"
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "exists excluded",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "exists",
+              "field": "process.parent.name",
+              "operator": "excluded"
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "must_not": {
+                  "bool": {
+                    "minimum_should_match": 1,
+                    "should": [
+                      {
+                        "exists": {
+                          "field": "process.parent.name"
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "wildcard included",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "wildcard",
+              "field": "file.path",
+              "operator": "included",
+              "value": "C:\\Program Files\\*\\updater.exe"
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "filter": {
+                  "wildcard": {
+                    "file.path": "C:\\Program Files\\*\\updater.exe"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "wildcard excluded",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "wildcard",
+              "field": "file.path",
+              "operator": "excluded",
+              "value": "/tmp/*"
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "must_not": {
+                  "bool": {
+                    "filter": {
+                      "wildcard": {
+                        "file.path": "/tmp/*"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "several entries are combined with AND",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "match",
+              "field": "process.name",
+              "operator": "included",
+              "value": "git"
+            },
+            {
+              "type": "match",
+              "field": "host.name",
+              "operator": "included",
+              "value": "nomad-client-prod-06"
+            },
+            {
+              "type": "exists",
+              "field": "process.args",
+              "operator": "excluded"
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "filter": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "process.name": "git"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.name": "nomad-client-prod-06"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "must_not": {
+                        "bool": {
+                          "minimum_should_match": 1,
+                          "should": [
+                            {
+                              "exists": {
+                                "field": "process.args"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "nested with one entry",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "nested",
+              "field": "file.Ext.code_signature",
+              "entries": [
+                {
+                  "type": "match",
+                  "field": "subject_name",
+                  "operator": "included",
+                  "value": "AnyDesk Software GmbH"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "nested": {
+                "path": "file.Ext.code_signature",
+                "query": {
+                  "bool": {
+                    "minimum_should_match": 1,
+                    "should": [
+                      {
+                        "match_phrase": {
+                          "file.Ext.code_signature.subject_name": "AnyDesk Software GmbH"
+                        }
+                      }
+                    ]
+                  }
+                },
+                "score_mode": "none"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "nested with several entries",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "nested",
+              "field": "file.Ext.code_signature",
+              "entries": [
+                {
+                  "type": "match",
+                  "field": "subject_name",
+                  "operator": "included",
+                  "value": "AnyDesk Software GmbH"
+                },
+                {
+                  "type": "match_any",
+                  "field": "status",
+                  "operator": "excluded",
+                  "value": [
+                    "errorExpired",
+                    "errorRevoked"
+                  ]
+                },
+                {
+                  "type": "exists",
+                  "field": "trusted",
+                  "operator": "included"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "nested": {
+                "path": "file.Ext.code_signature",
+                "query": {
+                  "bool": {
+                    "filter": [
+                      {
+                        "bool": {
+                          "minimum_should_match": 1,
+                          "should": [
+                            {
+                              "match_phrase": {
+                                "file.Ext.code_signature.subject_name": "AnyDesk Software GmbH"
+                              }
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "bool": {
+                          "must_not": {
+                            "bool": {
+                              "minimum_should_match": 1,
+                              "should": [
+                                {
+                                  "bool": {
+                                    "minimum_should_match": 1,
+                                    "should": [
+                                      {
+                                        "match_phrase": {
+                                          "file.Ext.code_signature.status": "errorExpired"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                },
+                                {
+                                  "bool": {
+                                    "minimum_should_match": 1,
+                                    "should": [
+                                      {
+                                        "match_phrase": {
+                                          "file.Ext.code_signature.status": "errorRevoked"
+                                        }
+                                      }
+                                    ]
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "bool": {
+                          "minimum_should_match": 1,
+                          "should": [
+                            {
+                              "exists": {
+                                "field": "file.Ext.code_signature.trusted"
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  }
+                },
+                "score_mode": "none"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "os types with one entry",
+      "items": [
+        {
+          "os_types": [
+            "windows"
+          ],
+          "entries": [
+            {
+              "type": "match",
+              "field": "process.name",
+              "operator": "included",
+              "value": "svchost.exe"
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "filter": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.os.type": "windows"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "process.name": "svchost.exe"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "filter": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.os.name.caseless": "windows"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "process.name": "svchost.exe"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "os types with several entries",
+      "items": [
+        {
+          "os_types": [
+            "linux",
+            "macos"
+          ],
+          "entries": [
+            {
+              "type": "match",
+              "field": "process.name",
+              "operator": "included",
+              "value": "sshd"
+            },
+            {
+              "type": "wildcard",
+              "field": "process.executable",
+              "operator": "included",
+              "value": "/usr/*"
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "filter": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.os.type": "linux"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "process.name": "sshd"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "filter": {
+                        "wildcard": {
+                          "process.executable": "/usr/*"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "filter": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.os.type": "macos"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "process.name": "sshd"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "filter": {
+                        "wildcard": {
+                          "process.executable": "/usr/*"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "filter": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.os.name.caseless": "linux"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "process.name": "sshd"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "filter": {
+                        "wildcard": {
+                          "process.executable": "/usr/*"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "filter": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.os.name.caseless": "macos"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "process.name": "sshd"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "filter": {
+                        "wildcard": {
+                          "process.executable": "/usr/*"
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "several items are combined with OR",
+      "items": [
+        {
+          "entries": [
+            {
+              "type": "match",
+              "field": "process.name",
+              "operator": "included",
+              "value": "git"
+            }
+          ]
+        },
+        {
+          "entries": [
+            {
+              "type": "match",
+              "field": "process.code_signature.subject_name",
+              "operator": "included",
+              "value": "AnyDesk Software GmbH"
+            },
+            {
+              "type": "match",
+              "field": "process.code_signature.trusted",
+              "operator": "included",
+              "value": "true"
+            }
+          ]
+        },
+        {
+          "os_types": [
+            "windows"
+          ],
+          "entries": [
+            {
+              "type": "exists",
+              "field": "dll.path",
+              "operator": "included"
+            }
+          ]
+        }
+      ],
+      "query": {
+        "bool": {
+          "should": [
+            {
+              "bool": {
+                "minimum_should_match": 1,
+                "should": [
+                  {
+                    "match_phrase": {
+                      "process.name": "git"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "filter": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "process.code_signature.subject_name": "AnyDesk Software GmbH"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "process.code_signature.trusted": "true"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "filter": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.os.type": "windows"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "exists": {
+                            "field": "dll.path"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "bool": {
+                "filter": [
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "match_phrase": {
+                            "host.os.name.caseless": "windows"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "bool": {
+                      "minimum_should_match": 1,
+                      "should": [
+                        {
+                          "exists": {
+                            "field": "dll.path"
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

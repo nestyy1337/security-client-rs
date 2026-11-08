@@ -7,13 +7,13 @@ The project is pre-1.0. It is not affiliated with or supported by Elastic.
 ## Coverage
 
 <!-- BEGIN API COVERAGE -->
-78 of the 663 operations in the Kibana 9.5.5 OpenAPI bundle have named builders. See the [coverage report](coverage/README.md) for each builder's route and known limits.
+79 of the 663 operations in the Kibana 9.5.5 OpenAPI bundle have named builders. See the [coverage report](coverage/README.md) for each builder's route and known limits.
 <!-- END API COVERAGE -->
 
 | Namespace | Endpoints |
 | --- | --- |
-| `security()` | Detection rules: find, get, create, patch, delete, import, export; privileges; alert index setup |
-| `exceptions()` | Exception lists and items: CRUD, search, summary, duplicate, import, export |
+| `security()` | Detection rules: find, get, create, patch, delete, import, export; privileges; alert index setup; alert search |
+| `exceptions()` | Exception lists and items: CRUD, search, summary, duplicate, import, export; `exceptions::query` for the alerts an exception suppresses |
 | `cases()` | Cases: find, get, create, update, delete; comments |
 | `fleet()` | Agent and package policies, packages, enrollment keys, agents, bulk agent actions, diagnostics, action status, outputs |
 | `spaces()` | Space CRUD |

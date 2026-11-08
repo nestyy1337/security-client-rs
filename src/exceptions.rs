@@ -7,6 +7,14 @@
 //! the retrieved state, so fields that are not changed are sent back as they were.
 //! Retrieved resources also carry their namespace: pass them to `get_*`,
 //! `delete_*` and `find_items` instead of repeating a selector and namespace.
+//!
+//! [`query`] and [`item_query`] build the Elasticsearch query matching what
+//! exception items suppress, to preview them against
+//! [`Security::search_alerts`](crate::security::Security::search_alerts).
+mod query;
+
+pub use query::{item_query, query};
+
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
@@ -42,6 +50,16 @@ pub enum OsType {
     Linux,
     Macos,
     Windows,
+}
+
+impl OsType {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Linux => "linux",
+            Self::Macos => "macos",
+            Self::Windows => "windows",
+        }
+    }
 }
 
 /// Identifies a list for rule associations and exports.
@@ -643,6 +661,15 @@ pub struct ExceptionItem {
     pub expire_time: Option<String>,
     #[serde(default)]
     pub meta: Option<Map<String, Value>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_by: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    /// The user who last changed the item, whether through the API or the Kibana UI.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_by: Option<String>,
     #[serde(flatten)]
     pub extra: Map<String, Value>,
 }

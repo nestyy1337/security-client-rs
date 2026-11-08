@@ -221,7 +221,7 @@ async fn retained_responses_decode_through_named_builders() {
                 assert_eq!(item.namespace_type, NamespaceType::Single);
                 assert_eq!(item.revision.as_deref(), Some("WzIsMV0="));
                 assert_eq!(item.entries[0]["type"], "match");
-                assert_eq!(item.extra["created_by"], "fixture-user");
+                assert_eq!(item.created_by.as_deref(), Some("fixture-user"));
             }
             "fleet.update_agent_policy" => {
                 let stored: AgentPolicy =

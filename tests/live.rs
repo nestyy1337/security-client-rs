@@ -314,7 +314,7 @@ async fn exception_lists_items_roundtrip_conflicts_and_spaces() {
             .await?
             .json()
             .await?;
-        assert_eq!(rule.extra["exceptions_list"][0]["list_id"], list.list_id);
+        assert_eq!(rule.exceptions_list[0].list_id, list.list_id);
         let detached = client
             .security()
             .patch_rule(RuleSelector::Id(&rule.id))
@@ -323,7 +323,7 @@ async fn exception_lists_items_roundtrip_conflicts_and_spaces() {
             .await?
             .json()
             .await?;
-        assert_eq!(detached.extra["exceptions_list"], serde_json::json!([]));
+        assert!(detached.exceptions_list.is_empty());
         client
             .security()
             .delete_rule(RuleSelector::Id(&rule.id))

@@ -730,7 +730,7 @@
     "operation_id": "FindRules",
     "scope": "Space",
     "contract": "partial",
-    "notes": "Page, page size, filter and sorting; no field selection or gap filters.",
+    "notes": "Page, page size, filter and sorting, by created_at ascending unless set; no field selection or gap filters.",
     "live_evidence": {
       "outcome": "success",
       "test": "live.rs:detection_rules_crud_export_import_and_space_isolation"
@@ -787,6 +787,15 @@
       "outcome": "success",
       "test": "live.rs:detection_rules_crud_export_import_and_space_isolation"
     }
+  },
+  {
+    "wrapper": "security.search_alerts",
+    "method": "POST",
+    "path": "/api/detection_engine/signals/search",
+    "operation_id": "SearchAlerts",
+    "scope": "Space",
+    "contract": "partial",
+    "notes": "Every body option; query, aggregations, sort and runtime mappings as caller-supplied JSON. Typed total; hits and aggregations remain JSON."
   },
   {
     "wrapper": "spaces.create",
